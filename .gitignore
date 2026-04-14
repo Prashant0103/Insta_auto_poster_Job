@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.env
+downloads/
+posted_videos.json
+.venv/
+venv/
