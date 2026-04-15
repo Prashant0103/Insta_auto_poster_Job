@@ -122,9 +122,39 @@ async def run_once() -> None:
     
     # Initialize components
     store = PostedStateStore(config.posted_state_file_path)
-    pending_record = store.get_pending_download()
     
-    # Check for pending download to resume
+    # First, check for pending download (downloaded but not posted)
+    pending_record = store.get_pending_download()
+    logger.info("Checked for pending downloads", found=pending_record is not None)
+    
+    # If no pending download, check for failed posts that can be retried
+    if pending_record is None:
+        failed_records = store.get_failed_records(max_attempts=3)
+        logger.info("Checked for failed records", count=len(failed_records))
+        
+        if failed_records:
+            # Find a failed record with existing file
+            for record in failed_records:
+                file_exists = Path(record.file_path).exists()
+                logger.info("Checking failed record", 
+                          video_id=record.video_id,
+                          attempts=record.attempts,
+                          file_exists=file_exists)
+                          
+                if file_exists:
+                    pending_record = record
+                    logger.info("Retrying failed post", 
+                              video_id=record.video_id,
+                              attempts=record.attempts,
+                              file_path=record.file_path,
+                              last_error=record.last_error[:100] + "..." if len(record.last_error) > 100 else record.last_error)
+                    break
+                else:
+                    logger.warning("Failed record file missing", 
+                                 video_id=record.video_id,
+                                 file_path=record.file_path)
+    
+    # Check for pending download to resume or retry
     if pending_record is not None:
         downloaded = _build_downloaded_video(pending_record)
         caption = pending_record.caption or build_caption(

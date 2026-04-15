@@ -40,7 +40,20 @@ class PostedStateStore:
 
     def _with_lock(self, func):
         """Execute function with file lock."""
-        with FileLock(str(self._lock_file), timeout=30):
+        try:
+            with FileLock(str(self._lock_file), timeout=10):
+                return func()
+        except Exception as e:
+            # If lock fails, try to clean up and retry once
+            if self._lock_file.exists():
+                try:
+                    self._lock_file.unlink()
+                    logger.warning("Removed stale lock file", lock_file=str(self._lock_file))
+                except OSError:
+                    pass
+            
+            # Retry once without lock (risky but better than failing)
+            logger.warning("File lock failed, proceeding without lock", error=str(e))
             return func()
 
     def load(self) -> dict[str, Any]:
@@ -63,7 +76,7 @@ class PostedStateStore:
                            video_count=len(data.get('posted_videos', [])))
                 return data
                 
-            except (json.JSONDecodeError, OSError) as e:
+            except (ValueError, OSError) as e:
                 logger.error("Failed to load state file", error=str(e))
                 raise StateStoreError(f"Failed to load state file: {e}") from e
         
@@ -196,7 +209,7 @@ class PostedStateStore:
                            status=record.status,
                            attempts=record.attempts)
                 
-            except (OSError, json.JSONEncodeError) as e:
+            except (OSError, ValueError) as e:
                 logger.error("Failed to upsert record", 
                            video_id=record.video_id,
                            error=str(e))
