@@ -24,7 +24,7 @@ class LoginPayload(BaseModel):
 
 class InstagramPostPayload(BaseModel):
     """Payload for creating Instagram post."""
-    media_path: str = Field(..., description="Path to media file (image or video)")
+    image_path: str = Field(..., description="Path to media file (image or video)")
     caption: str = Field(..., description="Post caption")
     music_query: str = Field("", description="Music search query")
     allow_without_music: bool = Field(True, description="Allow posting without music")
@@ -75,7 +75,7 @@ class MCPAutomationClient:
         
         async def _login():
             try:
-                result = await self._client.call_tool('login', payload.dict())
+                result = await self._client.call_tool('login', payload.model_dump())
                 logger.info("Instagram login successful")
                 return result
             except Exception as e:
@@ -109,14 +109,14 @@ class MCPAutomationClient:
         
         logger.info(
             "Creating Instagram post",
-            media_path=payload.media_path,
+            image_path=payload.image_path,
             caption_length=len(payload.caption),
             music_query=payload.music_query
         )
         
         async def _create_post():
             try:
-                result = await self._client.call_tool('create_instagram_post', payload.dict())
+                result = await self._client.call_tool('create_instagram_post', payload.model_dump())
                 logger.info("Instagram post created successfully")
                 return result
             except Exception as e:

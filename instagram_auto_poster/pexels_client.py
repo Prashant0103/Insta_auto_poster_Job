@@ -153,6 +153,7 @@ class PexelsClient:
     def _pick_video_file(video_files: List[dict]) -> dict | None:
         """
         Pick the best video file from available options.
+        Prioritize medium to high quality videos for better Instagram compatibility.
         
         Args:
             video_files: List of video file options from Pexels
@@ -168,10 +169,17 @@ class PexelsClient:
         if not mp4_files:
             return None
         
-        # Sort by resolution (smallest first for faster downloads)
+        # Sort by resolution (largest first for better quality)
+        # Instagram prefers higher quality videos for processing
         mp4_files.sort(key=lambda item: (
-            (item.get('width') or 0), 
-            (item.get('height') or 0)
-        ))
+            (item.get('width') or 0) * (item.get('height') or 0)
+        ), reverse=True)
         
-        return mp4_files[0]
+        # Try to get a medium-quality video (not the largest, but not the smallest)
+        # This balances quality with file size
+        if len(mp4_files) >= 3:
+            return mp4_files[1]  # Second largest
+        elif len(mp4_files) >= 2:
+            return mp4_files[0]  # Largest available
+        else:
+            return mp4_files[0]  # Only option

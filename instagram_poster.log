@@ -1,0 +1,13 @@
+HTTP Request: GET https://api.pexels.com/videos/search?query=test&per_page=1 "HTTP/1.1 200 OK"
+HTTP Request: GET http://127.0.0.1:8000/mcp/health "HTTP/1.1 404 Not Found"
+HTTP Request: GET https://api.pexels.com/videos/search?query=test&per_page=1 "HTTP/1.1 200 OK"
+HTTP Request: POST http://127.0.0.1:8000/mcp "HTTP/1.1 200 OK"
+Negotiated protocol version: 2025-11-25
+HTTP Request: POST http://127.0.0.1:8000/mcp "HTTP/1.1 202 Accepted"
+HTTP Request: POST http://127.0.0.1:8000/mcp "HTTP/1.1 200 OK"
+HTTP Request: POST http://127.0.0.1:8000/mcp "HTTP/1.1 200 OK"
+HTTP Request: GET http://127.0.0.1:8000/mcp/health "HTTP/1.1 404 Not Found"
+HTTP Request: GET https://api.pexels.com/videos/search?query=test&per_page=1 "HTTP/1.1 200 OK"
+HTTP Request: POST http://127.0.0.1:8000/mcp "HTTP/1.1 200 OK"
+Negotiated protocol version: 2025-11-25
+HTTP Request: POST http://127.0.0.1:8000/mcp "HTTP/1.1 202 Accepted"

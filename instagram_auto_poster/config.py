@@ -43,6 +43,8 @@ class AppConfig(BaseSettings):
     max_video_duration_seconds: int = Field(60, ge=1, le=300, description="Maximum video duration")
     min_aspect_ratio: float = Field(0.5, ge=0.1, le=10.0, description="Minimum aspect ratio")
     max_aspect_ratio: float = Field(2.0, ge=0.1, le=10.0, description="Maximum aspect ratio")
+    min_file_size_mb: float = Field(1.0, ge=0.1, le=100.0, description="Minimum file size in MB")
+    max_file_size_mb: float = Field(50.0, ge=1.0, le=500.0, description="Maximum file size in MB")
     
     # Logging Configuration
     log_level: str = Field("INFO", description="Logging level")

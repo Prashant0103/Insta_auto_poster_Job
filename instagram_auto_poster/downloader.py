@@ -88,9 +88,10 @@ class VideoDownloader:
                 if not file_path.exists() or file_path.stat().st_size == 0:
                     raise MediaProcessingError(f"Downloaded file is empty or missing: {file_path}")
                 
+                file_size_mb = file_path.stat().st_size / (1024*1024)
                 logger.info("Video download completed", 
                            video_id=video.video_id,
-                           file_size_mb=f"{file_path.stat().st_size / (1024*1024):.2f}")
+                           file_size_mb=f"{file_size_mb:.2f}")
                 
                 return DownloadedVideo(
                     video_id=video.video_id,

@@ -280,7 +280,7 @@ async def run_once() -> None:
 
             # Create post
             post_payload = InstagramPostPayload(
-                media_path=str(downloaded.file_path),
+                image_path=str(downloaded.file_path),
                 caption=caption,
                 music_query=music_query,
                 allow_without_music=config.allow_post_without_music,
