@@ -41,10 +41,10 @@ class AppConfig(BaseSettings):
     log_level: str = Field("INFO", description="Logging level")
     log_file: str = Field("", description="Optional log file path")
 
-    # Remote State Sync (GitHub Gist) — for Render free tier
+    # Remote State Sync (GitHub Gist) — for GitHub Actions / Render free tier
     # When both are set the state file is pulled from the Gist at startup
     # and pushed back after every run, giving free persistent storage.
-    github_token: Optional[str] = Field(None, description="GitHub PAT with gist scope")
+    gh_pat: Optional[str] = Field(None, description="GitHub PAT with gist scope (env var: GH_PAT)")
     state_gist_id: Optional[str] = Field(None, description="GitHub Gist ID for state storage")
     
     class Config:

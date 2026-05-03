@@ -125,12 +125,12 @@ async def run_once() -> None:
     store = PostedStateStore(config.posted_state_file_path)
 
     # Pull remote state from GitHub Gist (Render free tier — no persistent disk)
-    _gist_enabled = bool(config.github_token and config.state_gist_id)
+    _gist_enabled = bool(config.gh_pat and config.state_gist_id)
     if _gist_enabled:
         logger.info("Pulling state from GitHub Gist", gist_id=config.state_gist_id)
         await pull_state_from_gist(
             gist_id=config.state_gist_id,
-            github_token=config.github_token,
+            github_token=config.gh_pat,
             local_path=config.posted_state_file_path,
         )
     else:
@@ -331,7 +331,7 @@ async def run_once() -> None:
         if _gist_enabled:
             await push_state_to_gist(
                 gist_id=config.state_gist_id,
-                github_token=config.github_token,
+                github_token=config.gh_pat,
                 local_path=config.posted_state_file_path,
             )
         raise
@@ -375,7 +375,7 @@ async def run_once() -> None:
     if _gist_enabled:
         await push_state_to_gist(
             gist_id=config.state_gist_id,
-            github_token=config.github_token,
+            github_token=config.gh_pat,
             local_path=config.posted_state_file_path,
         )
 

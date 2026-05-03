@@ -36,9 +36,10 @@ jobs:
           IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
 
           # ── GitHub Gist state sync ──────────────────────────────────
-          # GH_PAT = a Personal Access Token with 'gist' scope
-          # (cannot use GITHUB_TOKEN here — it's reserved by Actions)
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          # GH_PAT must NOT be named GITHUB_TOKEN — that name is reserved
+          # by GitHub Actions and gets overridden with a repo-scoped token
+          # that cannot write to Gists.
+          GH_PAT: ${{ secrets.GH_PAT }}
           STATE_GIST_ID: ${{ secrets.STATE_GIST_ID }}
 
           # ── Content ─────────────────────────────────────────────────
