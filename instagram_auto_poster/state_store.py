@@ -20,6 +20,7 @@ class VideoRecord:
     query: str
     file_path: str
     source_url: str
+    download_url: str        # Direct CDN .mp4 URL used by the Graph API
     downloaded_at: str
     posted_at: str
     caption: str
@@ -122,8 +123,9 @@ class PostedStateStore:
             try:
                 # Ensure all required fields are present with defaults
                 normalized = {
-                    'attempts': item.get('attempts', 0),
-                    'last_error': item.get('last_error', ''),
+                    'attempts': 0,
+                    'last_error': '',
+                    'download_url': '',   # backwards-compat for old records
                     **item,
                 }
                 record = VideoRecord(**normalized)

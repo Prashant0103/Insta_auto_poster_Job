@@ -10,13 +10,14 @@ from typing import Optional
 from .caption_builder import build_caption
 from .config import load_config, AppConfig
 from .downloader import DownloadedVideo, VideoDownloader
-from .mcp_client import MCPAutomationClient, LoginPayload, InstagramPostPayload
+from .instagram_api_client import InstagramAPIClient
+from .gist_sync import pull_state_from_gist, push_state_to_gist
 from .pexels_client import PexelsClient, PexelsVideo
 from .state_store import PostedStateStore, VideoRecord
 from .health_check import HealthChecker
 from .logging_config import setup_logging, get_logger, log_error
 from .exceptions import (
-    ConfigurationError, PexelsNoResultsError, MCPError, 
+    ConfigurationError, PexelsNoResultsError, InstagramError,
     MediaProcessingError, AutoPosterError
 )
 
@@ -29,7 +30,7 @@ def _build_downloaded_video(record: VideoRecord) -> DownloadedVideo:
         video_id=record.video_id,
         file_path=Path(record.file_path),
         source_url=record.source_url,
-        download_url='',
+        download_url=record.download_url,
     )
 
 
@@ -82,7 +83,7 @@ async def run_health_check(config: AppConfig) -> bool:
         
         logger.info("Health check results",
                    healthy=status.overall_healthy,
-                   mcp_reachable=status.mcp_server_reachable,
+                   instagram_api_reachable=status.instagram_api_reachable,
                    pexels_accessible=status.pexels_api_accessible,
                    pending_downloads=status.pending_downloads,
                    recent_failures=status.failed_attempts_last_24h)
@@ -104,7 +105,7 @@ async def run_once() -> None:
     Raises:
         ConfigurationError: If configuration is invalid
         PexelsNoResultsError: If no suitable videos found
-        MCPError: If MCP operations fail
+        InstagramError: If Instagram Graph API operations fail
         MediaProcessingError: If media processing fails
     """
     # Load configuration and setup logging
@@ -122,6 +123,18 @@ async def run_once() -> None:
     
     # Initialize components
     store = PostedStateStore(config.posted_state_file_path)
+
+    # Pull remote state from GitHub Gist (Render free tier — no persistent disk)
+    _gist_enabled = bool(config.github_token and config.state_gist_id)
+    if _gist_enabled:
+        logger.info("Pulling state from GitHub Gist", gist_id=config.state_gist_id)
+        await pull_state_from_gist(
+            gist_id=config.state_gist_id,
+            github_token=config.github_token,
+            local_path=config.posted_state_file_path,
+        )
+    else:
+        logger.debug("Gist sync not configured — using local state only")
     
     # First, check for pending download (downloaded but not posted)
     pending_record = store.get_pending_download()
@@ -168,6 +181,7 @@ async def run_once() -> None:
         )
         query = pending_record.query
         source_url = pending_record.source_url
+        download_url = pending_record.download_url
         downloaded_at = pending_record.downloaded_at
         attempts = pending_record.attempts
         
@@ -238,6 +252,7 @@ async def run_once() -> None:
         )
         query = config.pexels_query
         source_url = downloaded.source_url
+        download_url = downloaded.download_url
         downloaded_at = datetime.now().isoformat(timespec='seconds')
         attempts = 0
 
@@ -248,6 +263,7 @@ async def run_once() -> None:
                 query=query,
                 file_path=str(downloaded.file_path),
                 source_url=source_url,
+                download_url=download_url,
                 downloaded_at=downloaded_at,
                 posted_at='',
                 caption=caption,
@@ -262,32 +278,29 @@ async def run_once() -> None:
                    video_id=downloaded.video_id,
                    file_path=str(downloaded.file_path))
 
-    # Post to Instagram via MCP
+    # Post to Instagram via Graph API
     try:
-        async with MCPAutomationClient(config.mcp_server_url) as client:
-            # Login
-            login_payload = LoginPayload(
-                url=config.instagram_login_url,
-                username=config.instagram_username,
-                password=config.instagram_password,
-                username_selector=config.instagram_username_selector,
-                password_selector=config.instagram_password_selector,
-                submit_selector=config.instagram_submit_selector,
-            )
-            
-            login_result = await client.login(login_payload)
-            logger.info("Instagram login completed", result=login_result)
+        async with InstagramAPIClient(
+            ig_user_id=config.ig_user_id,
+            access_token=config.ig_access_token,
+        ) as client:
+            # download_url is the direct Pexels CDN .mp4 link — required by the Graph API.
+            # source_url is the human-facing Pexels page URL and must NOT be used here.
+            video_url = downloaded.download_url
 
-            # Create post
-            post_payload = InstagramPostPayload(
-                media_path=str(downloaded.file_path),
-                caption=caption,
-                music_query=music_query,
-                allow_without_music=config.allow_post_without_music,
+            logger.info(
+                "Posting video to Instagram via Graph API",
+                video_url=video_url,
+                caption_length=len(caption),
             )
-            
-            post_result = await client.create_instagram_post(post_payload)
-            logger.info("Instagram post created", result=post_result)
+
+            media_id = await client.create_and_publish(
+                video_url=video_url,
+                caption=caption,
+                media_type="REELS",
+                share_to_feed=True,
+            )
+            logger.info("Instagram post created", media_id=media_id)
             
     except Exception as exc:
         # Record failure
@@ -304,6 +317,7 @@ async def run_once() -> None:
                 query=query,
                 file_path=str(downloaded.file_path),
                 source_url=source_url,
+                download_url=download_url,
                 downloaded_at=downloaded_at,
                 posted_at='',
                 caption=caption,
@@ -313,6 +327,13 @@ async def run_once() -> None:
                 last_error=error_msg,
             )
         )
+        # Push failure state so next run knows this video already failed
+        if _gist_enabled:
+            await push_state_to_gist(
+                gist_id=config.state_gist_id,
+                github_token=config.github_token,
+                local_path=config.posted_state_file_path,
+            )
         raise
 
     # Record success
@@ -322,6 +343,7 @@ async def run_once() -> None:
             query=query,
             file_path=str(downloaded.file_path),
             source_url=source_url,
+            download_url=download_url,
             downloaded_at=downloaded_at,
             posted_at=datetime.now().isoformat(timespec='seconds'),
             caption=caption,
@@ -331,10 +353,31 @@ async def run_once() -> None:
             last_error='',
         )
     )
-    
-    logger.info("Instagram post completed successfully", 
+
+    # Delete the local video file now that it has been published
+    try:
+        downloaded.file_path.unlink(missing_ok=True)
+        logger.info("Deleted local video file after successful post",
+                    file_path=str(downloaded.file_path),
+                    video_id=downloaded.video_id)
+    except OSError as e:
+        # Non-fatal — log and continue; disk cleanup can be done manually
+        logger.warning("Failed to delete local video file",
+                       file_path=str(downloaded.file_path),
+                       video_id=downloaded.video_id,
+                       error=str(e))
+
+    logger.info("Instagram post completed successfully",
                video_id=downloaded.video_id,
                total_attempts=attempts + 1)
+
+    # Push updated state to GitHub Gist so next run sees this video as posted
+    if _gist_enabled:
+        await push_state_to_gist(
+            gist_id=config.state_gist_id,
+            github_token=config.github_token,
+            local_path=config.posted_state_file_path,
+        )
 
 
 async def run_health_check_only() -> None:

@@ -12,7 +12,7 @@ import httpx
 from .config import AppConfig
 from .state_store import PostedStateStore
 from .logging_config import get_logger
-from .exceptions import MCPConnectionError, PexelsAPIError
+from .exceptions import InstagramAPIError, PexelsAPIError
 
 logger = get_logger(__name__)
 
@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 @dataclass
 class HealthStatus:
     """Health check status information."""
-    mcp_server_reachable: bool
+    instagram_api_reachable: bool
     pexels_api_accessible: bool
     last_successful_post: Optional[datetime]
     pending_downloads: int
@@ -49,10 +49,10 @@ class HealthChecker:
         logger.info("Starting health check")
         issues = []
         
-        # Check MCP server
-        mcp_reachable = await self._check_mcp_server()
-        if not mcp_reachable:
-            issues.append("MCP server is not reachable")
+        # Check Instagram Graph API
+        ig_api_reachable = await self._check_instagram_api()
+        if not ig_api_reachable:
+            issues.append("Instagram Graph API is not reachable or access token is invalid")
         
         # Check Pexels API
         pexels_accessible = await self._check_pexels_api()
@@ -87,7 +87,7 @@ class HealthChecker:
         overall_healthy = len(issues) == 0
         
         status = HealthStatus(
-            mcp_server_reachable=mcp_reachable,
+            instagram_api_reachable=ig_api_reachable,
             pexels_api_accessible=pexels_accessible,
             last_successful_post=last_post,
             pending_downloads=pending,
@@ -104,15 +104,27 @@ class HealthChecker:
         
         return status
 
-    async def _check_mcp_server(self) -> bool:
-        """Check if MCP server is reachable."""
+    async def _check_instagram_api(self) -> bool:
+        """Check if the Instagram Graph API is reachable and the token is valid."""
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                # Try to reach the MCP server endpoint
-                response = await client.get(f"{self.config.mcp_server_url}/health")
-                return response.status_code < 500
+                response = await client.get(
+                    "https://graph.facebook.com/v19.0/me",
+                    params={
+                        "fields": "id,name",
+                        "access_token": self.config.ig_access_token,
+                    },
+                )
+                if response.status_code == 200:
+                    return True
+                logger.warning(
+                    "Instagram API health check returned non-200",
+                    status=response.status_code,
+                    body=response.text[:200],
+                )
+                return False
         except Exception as e:
-            logger.warning("MCP server health check failed", error=str(e))
+            logger.warning("Instagram API health check failed", error=str(e))
             return False
 
     async def _check_pexels_api(self) -> bool:

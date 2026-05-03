@@ -13,18 +13,8 @@ class ConfigurationError(AutoPosterError):
     pass
 
 
-class MCPError(AutoPosterError):
-    """Base MCP error."""
-    pass
-
-
-class MCPConnectionError(MCPError):
-    """MCP server connection issues."""
-    pass
-
-
-class MCPAuthenticationError(MCPError):
-    """MCP authentication failures."""
+class InstagramAPIError(AutoPosterError):
+    """Instagram Graph API errors (replaces the former MCP-based errors)."""
     pass
 
 

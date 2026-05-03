@@ -1,0 +1,66 @@
+# Render Blueprint — Instagram Auto Poster Cron Job (Free Plan)
+#
+# Schedule: daily at 09:00 IST = 03:30 UTC
+#
+# State persistence: GitHub Gist (free — no disk needed)
+#   posted_videos.json is pulled from a secret Gist at startup
+#   and pushed back after each run.
+#
+# Required env vars to set in Render dashboard (marked sync: false):
+#   PEXELS_API_KEY, IG_USER_ID, IG_ACCESS_TOKEN,
+#   GITHUB_TOKEN, STATE_GIST_ID
+
+services:
+  - type: cron
+    name: instagram-auto-poster
+    runtime: python
+    schedule: "30 3 * * *"   # 03:30 UTC = 09:00 IST every day
+    region: singapore         # Closest region to IST; change if needed
+    plan: free                # Free plan — no persistent disk needed
+
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+
+    envVars:
+      # ── Pexels ────────────────────────────────────────────────────────
+      - key: PEXELS_API_KEY
+        sync: false           # Set this in the Render dashboard
+      - key: PEXELS_QUERY
+        value: nature,landscape,travel
+      - key: PEXELS_PER_PAGE
+        value: 20
+
+      # ── Instagram Graph API ───────────────────────────────────────────
+      - key: IG_USER_ID
+        sync: false           # Set this in the Render dashboard
+      - key: IG_ACCESS_TOKEN
+        sync: false           # Set this in the Render dashboard
+
+      # ── GitHub Gist state sync (replaces persistent disk) ─────────────
+      # GITHUB_TOKEN: a Personal Access Token with the 'gist' scope only
+      # STATE_GIST_ID: the ID from the gist URL:
+      #   https://gist.github.com/<user>/<STATE_GIST_ID>
+      - key: GITHUB_TOKEN
+        sync: false           # Set this in the Render dashboard
+      - key: STATE_GIST_ID
+        sync: false           # Set this in the Render dashboard
+
+      # ── Content ───────────────────────────────────────────────────────
+      - key: CAPTION_THEME
+        value: inspirational
+      - key: DEFAULT_HASHTAGS
+        value: "#nature,#beautiful,#photography,#explore,#adventure"
+      - key: INSTAGRAM_MUSIC_QUERIES
+        value: ""
+
+      # ── Posting rules ─────────────────────────────────────────────────
+      - key: MAX_VIDEO_DURATION_SECONDS
+        value: 60
+      - key: MIN_ASPECT_RATIO
+        value: 0.5
+      - key: MAX_ASPECT_RATIO
+        value: 2.0
+
+      # ── Logging ───────────────────────────────────────────────────────
+      - key: LOG_LEVEL
+        value: INFO

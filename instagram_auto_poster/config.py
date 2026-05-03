@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from pydantic import validator, Field
 from pydantic_settings import BaseSettings
@@ -18,16 +18,9 @@ class AppConfig(BaseSettings):
     pexels_query: str = Field(..., description="Search query for Pexels videos")
     pexels_per_page: int = Field(20, ge=1, le=80, description="Number of videos per page")
     
-    # MCP Server Configuration
-    mcp_server_url: str = Field(..., description="MCP server URL")
-    
-    # Instagram Configuration
-    instagram_login_url: str = Field(..., description="Instagram login URL")
-    instagram_username: str = Field(..., description="Instagram username")
-    instagram_password: str = Field(..., description="Instagram password")
-    instagram_username_selector: str = Field(..., description="CSS selector for username field")
-    instagram_password_selector: str = Field(..., description="CSS selector for password field")
-    instagram_submit_selector: str = Field(..., description="CSS selector for submit button")
+    # Instagram Graph API Configuration
+    ig_user_id: str = Field(..., description="Instagram Business/Creator account user ID")
+    ig_access_token: str = Field(..., description="Instagram Graph API access token")
     
     # File Paths
     download_dir: str = Field("downloads", description="Directory for downloaded videos")
@@ -47,25 +40,31 @@ class AppConfig(BaseSettings):
     # Logging Configuration
     log_level: str = Field("INFO", description="Logging level")
     log_file: str = Field("", description="Optional log file path")
+
+    # Remote State Sync (GitHub Gist) — for Render free tier
+    # When both are set the state file is pulled from the Gist at startup
+    # and pushed back after every run, giving free persistent storage.
+    github_token: Optional[str] = Field(None, description="GitHub PAT with gist scope")
+    state_gist_id: Optional[str] = Field(None, description="GitHub Gist ID for state storage")
     
     class Config:
         env_file = '.env'
         case_sensitive = False
         extra = 'ignore'  # Ignore extra fields in .env
         
-    @validator('mcp_server_url')
-    def validate_mcp_url(cls, v: str) -> str:
-        """Validate MCP server URL format."""
-        if not v.startswith(('http://', 'https://')):
-            raise ValueError('MCP server URL must start with http:// or https://')
+    @validator('ig_access_token')
+    def validate_ig_access_token(cls, v: str) -> str:
+        """Validate Instagram access token is present."""
+        if not v or len(v) < 10:
+            raise ValueError('IG_ACCESS_TOKEN must be a valid Instagram Graph API token')
         return v
-    
-    @validator('instagram_login_url')
-    def validate_instagram_url(cls, v: str) -> str:
-        """Validate Instagram URL format."""
-        if not v.startswith(('http://', 'https://')):
-            raise ValueError('Instagram URL must start with http:// or https://')
-        return v
+
+    @validator('ig_user_id')
+    def validate_ig_user_id(cls, v: str) -> str:
+        """Validate Instagram user ID is numeric."""
+        if not v or not v.strip().isdigit():
+            raise ValueError('IG_USER_ID must be a numeric Instagram account ID')
+        return v.strip()
     
     @validator('min_aspect_ratio', 'max_aspect_ratio')
     def validate_aspect_ratios(cls, v: float, values: dict) -> float:
@@ -91,19 +90,22 @@ class AppConfig(BaseSettings):
     
     @property
     def download_dir_path(self) -> Path:
-        """Get download directory as Path object."""
-        return Path.cwd() / self.download_dir
-    
+        """Get download directory as Path object (absolute or cwd-relative)."""
+        p = Path(self.download_dir)
+        return p if p.is_absolute() else Path.cwd() / p
+
     @property
     def posted_state_file_path(self) -> Path:
-        """Get posted state file as Path object."""
-        return Path.cwd() / self.posted_state_file
-    
+        """Get posted state file as Path object (absolute or cwd-relative)."""
+        p = Path(self.posted_state_file)
+        return p if p.is_absolute() else Path.cwd() / p
+
     @property
     def log_file_path(self) -> Path | None:
-        """Get log file as Path object if specified."""
+        """Get log file as Path object if specified (absolute or cwd-relative)."""
         if self.log_file:
-            return Path.cwd() / self.log_file
+            p = Path(self.log_file)
+            return p if p.is_absolute() else Path.cwd() / p
         return None
     
     @property

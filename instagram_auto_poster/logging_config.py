@@ -10,6 +10,15 @@ from typing import Any
 import structlog
 
 
+def _colors_supported() -> bool:
+    """Return True only when colorama is installed (required by structlog colors)."""
+    try:
+        import colorama  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 def setup_logging(log_level: str = "INFO", log_file: Path | None = None) -> None:
     """
     Setup structured logging for the application.
@@ -40,7 +49,7 @@ def setup_logging(log_level: str = "INFO", log_file: Path | None = None) -> None
             structlog.processors.StackInfoRenderer(),
             structlog.dev.set_exc_info,
             structlog.processors.TimeStamper(fmt="ISO"),
-            structlog.dev.ConsoleRenderer(colors=True)
+            structlog.dev.ConsoleRenderer(colors=_colors_supported())
         ],
         wrapper_class=structlog.make_filtering_bound_logger(
             getattr(logging, log_level.upper())
