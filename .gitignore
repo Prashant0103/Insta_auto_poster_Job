@@ -1,7 +1,21 @@
+# Python
 __pycache__/
 *.pyc
+*.pyo
+
+# Environment & secrets
 .env
-downloads/
+
+# Runtime data (never commit — state is stored in GitHub Gist on Render)
 posted_videos.json
-.venv/
+downloads/
+*.lock
+
+# Virtual environments
 venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
