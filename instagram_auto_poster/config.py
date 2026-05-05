@@ -18,9 +18,10 @@ class AppConfig(BaseSettings):
     pexels_query: str = Field(..., description="Search query for Pexels videos")
     pexels_per_page: int = Field(20, ge=1, le=80, description="Number of videos per page")
 
-    # Pixabay Music Configuration
-    pixabay_api_key: str = Field(..., description="Pixabay API key for background music")
-    music_query: str = Field("ambient relaxing cinematic", description="Music search query for Pixabay")
+    # Jamendo Music Configuration
+    # Free client_id from: https://devportal.jamendo.com
+    jamendo_client_id: str = Field(..., description="Jamendo API client_id for background music")
+    music_query: str = Field("ambient relaxing cinematic", description="Space-separated tags for Jamendo music search")
     music_volume: float = Field(0.8, ge=0.0, le=1.0, description="Background music volume (0.0–1.0)")
     
     # Instagram Graph API Configuration

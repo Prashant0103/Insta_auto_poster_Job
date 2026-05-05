@@ -288,12 +288,12 @@ async def run_once() -> None:
     music_file: Path | None = None
 
     try:
-        async with MusicClient(config.pixabay_api_key) as music:
+        async with MusicClient(config.jamendo_client_id) as music:
             track = await music.get_random_track(config.music_query)
 
         if track:
             music_file = downloaded.file_path.with_suffix(".music.mp3")
-            async with MusicClient(config.pixabay_api_key) as music:
+            async with MusicClient(config.jamendo_client_id) as music:
                 await music.download_track(track, music_file)
 
             merged_path = downloaded.file_path.with_suffix(".merged.mp4")

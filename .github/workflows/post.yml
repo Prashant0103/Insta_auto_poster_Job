@@ -31,8 +31,8 @@ jobs:
           PEXELS_QUERY: "nature,landscape,travel"
           PEXELS_PER_PAGE: "20"
 
-          # ── Pixabay Music ───────────────────────────────────────────
-          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          # ── Jamendo Music ───────────────────────────────────────────
+          JAMENDO_CLIENT_ID: ${{ secrets.JAMENDO_CLIENT_ID }}
           MUSIC_QUERY: "ambient relaxing cinematic"
           MUSIC_VOLUME: "0.8"
 

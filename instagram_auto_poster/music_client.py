@@ -1,4 +1,11 @@
-"""Pixabay Music API client — search and download royalty-free background music."""
+"""Jamendo Music API client — search and download royalty-free background music.
+
+Jamendo is a free music platform with a proper REST API.
+All tracks are Creative Commons licensed — free to use.
+
+API docs: https://developer.jamendo.com/v3.0/tracks
+Register for a free client_id at: https://devportal.jamendo.com
+"""
 
 from __future__ import annotations
 
@@ -14,83 +21,82 @@ from .retry_utils import retry_with_backoff
 
 logger = get_logger(__name__)
 
-_PIXABAY_MUSIC_API = "https://pixabay.com/api/music/"
+_JAMENDO_API = "https://api.jamendo.com/v3.0/tracks/"
 
 
 @dataclass(slots=True)
 class MusicTrack:
-    """Represents a Pixabay music track."""
-    track_id: int
+    """Represents a Jamendo music track."""
+    track_id: str
     title: str
-    duration: int    # seconds
-    audio_url: str   # direct MP3 download URL
+    duration: int    # seconds (0 if unknown)
+    audio_url: str   # direct MP3 streaming/download URL
 
 
 class MusicClient:
-    """Async client for the Pixabay Music API."""
+    """Async client for the Jamendo Music API."""
 
-    def __init__(self, api_key: str) -> None:
-        self._api_key = api_key
-        self._client = httpx.AsyncClient(
+    def __init__(self, client_id: str) -> None:
+        self._client_id = client_id
+        self._http = httpx.AsyncClient(
             timeout=httpx.Timeout(60.0),
             limits=httpx.Limits(max_keepalive_connections=2, max_connections=5),
         )
-        logger.info("Initialized Pixabay music client")
+        logger.info("Initialized Jamendo music client")
 
     async def __aenter__(self) -> "MusicClient":
-        await self._client.__aenter__()
+        await self._http.__aenter__()
         return self
 
     async def __aexit__(self, *args) -> None:
-        await self._client.__aexit__(*args)
+        await self._http.__aexit__(*args)
 
-    async def search_tracks(self, query: str, per_page: int = 20) -> list[MusicTrack]:
+    async def search_tracks(self, query: str, limit: int = 20) -> list[MusicTrack]:
         """
-        Search for music tracks on Pixabay.
+        Search for music tracks on Jamendo by tags/keywords.
 
         Args:
-            query:    Search keywords (e.g. 'ambient nature relaxing')
-            per_page: Max results to fetch (1–200)
+            query: Space-separated tags (e.g. 'ambient relaxing nature')
+            limit: Max results to return (1–200)
 
         Returns:
-            List of MusicTrack objects with direct download URLs.
+            List of MusicTrack objects.
         """
         async def _search():
-            response = await self._client.get(
-                _PIXABAY_MUSIC_API,
+            response = await self._http.get(
+                _JAMENDO_API,
                 params={
-                    "key": self._api_key,
-                    "q": query,
-                    "per_page": min(per_page, 200),
+                    "client_id": self._client_id,
+                    "format": "json",
+                    "limit": min(limit, 200),
+                    "tags": query,          # space-separated tags
+                    "audioformat": "mp31",  # 128 kbps MP3 — small enough to download fast
+                    "include": "musicinfo", # includes genre/mood info in response
                 },
             )
             response.raise_for_status()
             data = response.json()
 
             tracks: list[MusicTrack] = []
-            for hit in data.get("hits", []):
-                # Pixabay music API returns the download URL in one of these fields
-                audio_url = (
-                    hit.get("audio", {}).get("url", "")
-                    or hit.get("previewURL", "")
-                    or hit.get("audioURL", "")
-                )
+            for hit in data.get("results", []):
+                # Jamendo returns 'audio' (streaming) and 'audiodownload' (download)
+                audio_url = hit.get("audiodownload") or hit.get("audio", "")
                 if not audio_url:
                     continue
 
                 tracks.append(
                     MusicTrack(
-                        track_id=hit.get("id", 0),
-                        title=hit.get("title", "Unknown"),
+                        track_id=str(hit.get("id", "")),
+                        title=hit.get("name", "Unknown"),
                         duration=int(hit.get("duration", 0)),
                         audio_url=audio_url,
                     )
                 )
 
             logger.info(
-                "Pixabay music search completed",
+                "Jamendo search completed",
                 query=query,
-                total_hits=data.get("totalHits", 0),
+                results_total=data.get("headers", {}).get("results_count", "?"),
                 tracks_with_url=len(tracks),
             )
             return tracks
@@ -104,12 +110,12 @@ class MusicClient:
             )
         except httpx.HTTPStatusError as e:
             logger.error(
-                "Pixabay API error",
+                "Jamendo API error",
                 status=e.response.status_code,
                 body=e.response.text[:300],
             )
             raise MediaProcessingError(
-                f"Pixabay music search failed (HTTP {e.response.status_code})"
+                f"Jamendo music search failed (HTTP {e.response.status_code})"
             ) from e
 
     async def download_track(self, track: MusicTrack, output_path: Path) -> Path:
@@ -126,7 +132,7 @@ class MusicClient:
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         async def _download():
-            async with self._client.stream("GET", track.audio_url) as response:
+            async with self._http.stream("GET", track.audio_url) as response:
                 response.raise_for_status()
                 with output_path.open("wb") as fh:
                     async for chunk in response.aiter_bytes(1024 * 256):
@@ -136,11 +142,12 @@ class MusicClient:
             if not output_path.exists() or output_path.stat().st_size == 0:
                 raise MediaProcessingError("Downloaded music file is empty")
 
+            size_kb = output_path.stat().st_size / 1024
             logger.info(
                 "Music track downloaded",
                 title=track.title,
                 duration_s=track.duration,
-                size_kb=f"{output_path.stat().st_size / 1024:.1f}",
+                size_kb=f"{size_kb:.1f}",
                 path=str(output_path),
             )
             return output_path
@@ -161,14 +168,17 @@ class MusicClient:
         Return a random eligible track for the given query.
 
         Args:
-            query:        Search keywords.
-            max_duration: Skip tracks longer than this (seconds).
+            query:        Space-separated tags to search Jamendo.
+            max_duration: Skip tracks longer than this many seconds.
 
         Returns:
             A random MusicTrack, or None if nothing was found.
         """
         tracks = await self.search_tracks(query)
-        eligible = [t for t in tracks if t.audio_url and (t.duration == 0 or t.duration <= max_duration)]
+        eligible = [
+            t for t in tracks
+            if t.audio_url and (t.duration == 0 or t.duration <= max_duration)
+        ]
 
         if not eligible:
             logger.warning("No eligible music tracks found", query=query)
