@@ -320,28 +320,20 @@ async def run_once() -> None:
             music_file.unlink(missing_ok=True)
 
     # Post to Instagram via Graph API
-    # NOTE: The Graph API requires a public HTTPS URL — we still use the
-    # original Pexels CDN URL here. The merged (music-added) file is
-    # uploaded to Cloudinary first to get a public URL.
+    # The Graph API needs a public HTTPS URL. If music was merged, upload
+    # the local file to transfer.sh (free, no account) to get one.
+    # If no music was added, use the original Pexels CDN URL directly.
     try:
         async with InstagramAPIClient(
             ig_user_id=config.ig_user_id,
             access_token=config.ig_access_token,
         ) as client:
-            # Use merged video URL if music was added, otherwise fall back to Pexels CDN
             if upload_file_path != downloaded.file_path:
-                # Upload merged video to Cloudinary to get a public URL
-                from .cloudinary_uploader import upload_to_cloudinary, delete_from_cloudinary
-                public_url, public_id = await upload_to_cloudinary(
-                    file_path=upload_file_path,
-                    cloud_name=config.cloudinary_cloud_name,
-                    api_key=config.cloudinary_api_key,
-                    api_secret=config.cloudinary_api_secret,
-                )
-                video_url = public_url
-                logger.info("Merged video uploaded to Cloudinary", url=public_url)
+                # Upload merged video to transfer.sh — returns a public URL
+                from .transfer_sh_uploader import upload_to_transfer_sh
+                video_url = await upload_to_transfer_sh(upload_file_path)
+                logger.info("Merged video hosted at transfer.sh", url=video_url)
             else:
-                public_id = None
                 video_url = downloaded.download_url
 
             logger.info(
@@ -357,16 +349,7 @@ async def run_once() -> None:
                 share_to_feed=True,
             )
             logger.info("Instagram post created", media_id=media_id)
-
-            # Delete from Cloudinary after successful publish
-            if public_id:
-                await delete_from_cloudinary(
-                    public_id=public_id,
-                    cloud_name=config.cloudinary_cloud_name,
-                    api_key=config.cloudinary_api_key,
-                    api_secret=config.cloudinary_api_secret,
-                )
-                logger.info("Deleted video from Cloudinary", public_id=public_id)
+            # transfer.sh link expires automatically after 1 day — no cleanup needed
     except Exception as exc:
         # Record failure
         error_msg = str(exc)

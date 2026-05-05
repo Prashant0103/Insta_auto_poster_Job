@@ -26,11 +26,6 @@ class AppConfig(BaseSettings):
     # Instagram Graph API Configuration
     ig_user_id: str = Field(..., description="Instagram Business/Creator account user ID")
     ig_access_token: str = Field(..., description="Instagram Graph API access token")
-
-    # Cloudinary Configuration (free tier — hosts merged video for Graph API)
-    cloudinary_cloud_name: str = Field(..., description="Cloudinary cloud name")
-    cloudinary_api_key: str = Field(..., description="Cloudinary API key")
-    cloudinary_api_secret: str = Field(..., description="Cloudinary API secret")
     
     # File Paths
     download_dir: str = Field("downloads", description="Directory for downloaded videos")
