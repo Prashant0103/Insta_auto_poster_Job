@@ -17,10 +17,20 @@ class AppConfig(BaseSettings):
     pexels_api_key: str = Field(..., description="Pexels API key")
     pexels_query: str = Field(..., description="Search query for Pexels videos")
     pexels_per_page: int = Field(20, ge=1, le=80, description="Number of videos per page")
+
+    # Pixabay Music Configuration
+    pixabay_api_key: str = Field(..., description="Pixabay API key for background music")
+    music_query: str = Field("ambient relaxing cinematic", description="Music search query for Pixabay")
+    music_volume: float = Field(0.8, ge=0.0, le=1.0, description="Background music volume (0.0–1.0)")
     
     # Instagram Graph API Configuration
     ig_user_id: str = Field(..., description="Instagram Business/Creator account user ID")
     ig_access_token: str = Field(..., description="Instagram Graph API access token")
+
+    # Cloudinary Configuration (free tier — hosts merged video for Graph API)
+    cloudinary_cloud_name: str = Field(..., description="Cloudinary cloud name")
+    cloudinary_api_key: str = Field(..., description="Cloudinary API key")
+    cloudinary_api_secret: str = Field(..., description="Cloudinary API secret")
     
     # File Paths
     download_dir: str = Field("downloads", description="Directory for downloaded videos")

@@ -12,6 +12,8 @@ from .config import load_config, AppConfig
 from .downloader import DownloadedVideo, VideoDownloader
 from .instagram_api_client import InstagramAPIClient
 from .gist_sync import pull_state_from_gist, push_state_to_gist
+from .music_client import MusicClient
+from .video_processor import merge_video_with_music
 from .pexels_client import PexelsClient, PexelsVideo
 from .state_store import PostedStateStore, VideoRecord
 from .health_check import HealthChecker
@@ -274,19 +276,73 @@ async def run_once() -> None:
             )
         )
         
-        logger.info("Video downloaded and recorded", 
+        logger.info("Video downloaded and recorded",
                    video_id=downloaded.video_id,
                    file_path=str(downloaded.file_path))
 
+    # ── Add background music ───────────────────────────────────────────
+    # Search Pixabay for a music track matching the music_query, download
+    # it, and let ffmpeg bake it into the video before uploading.
+    # If anything fails the original silent video is used as a fallback.
+    upload_file_path = downloaded.file_path   # may be replaced below
+    music_file: Path | None = None
+
+    try:
+        async with MusicClient(config.pixabay_api_key) as music:
+            track = await music.get_random_track(config.music_query)
+
+        if track:
+            music_file = downloaded.file_path.with_suffix(".music.mp3")
+            async with MusicClient(config.pixabay_api_key) as music:
+                await music.download_track(track, music_file)
+
+            merged_path = downloaded.file_path.with_suffix(".merged.mp4")
+            merge_video_with_music(
+                video_path=downloaded.file_path,
+                music_path=music_file,
+                output_path=merged_path,
+                music_volume=config.music_volume,
+            )
+            upload_file_path = merged_path
+            logger.info("Using music-merged video for upload",
+                        track=track.title,
+                        path=str(merged_path))
+        else:
+            logger.warning("No music track found — uploading original video")
+
+    except Exception as e:
+        logger.warning(
+            "Music step failed — falling back to original video",
+            error=str(e),
+        )
+        # Clean up any partial music file
+        if music_file and music_file.exists():
+            music_file.unlink(missing_ok=True)
+
     # Post to Instagram via Graph API
+    # NOTE: The Graph API requires a public HTTPS URL — we still use the
+    # original Pexels CDN URL here. The merged (music-added) file is
+    # uploaded to Cloudinary first to get a public URL.
     try:
         async with InstagramAPIClient(
             ig_user_id=config.ig_user_id,
             access_token=config.ig_access_token,
         ) as client:
-            # download_url is the direct Pexels CDN .mp4 link — required by the Graph API.
-            # source_url is the human-facing Pexels page URL and must NOT be used here.
-            video_url = downloaded.download_url
+            # Use merged video URL if music was added, otherwise fall back to Pexels CDN
+            if upload_file_path != downloaded.file_path:
+                # Upload merged video to Cloudinary to get a public URL
+                from .cloudinary_uploader import upload_to_cloudinary, delete_from_cloudinary
+                public_url, public_id = await upload_to_cloudinary(
+                    file_path=upload_file_path,
+                    cloud_name=config.cloudinary_cloud_name,
+                    api_key=config.cloudinary_api_key,
+                    api_secret=config.cloudinary_api_secret,
+                )
+                video_url = public_url
+                logger.info("Merged video uploaded to Cloudinary", url=public_url)
+            else:
+                public_id = None
+                video_url = downloaded.download_url
 
             logger.info(
                 "Posting video to Instagram via Graph API",
@@ -301,7 +357,16 @@ async def run_once() -> None:
                 share_to_feed=True,
             )
             logger.info("Instagram post created", media_id=media_id)
-            
+
+            # Delete from Cloudinary after successful publish
+            if public_id:
+                await delete_from_cloudinary(
+                    public_id=public_id,
+                    cloud_name=config.cloudinary_cloud_name,
+                    api_key=config.cloudinary_api_key,
+                    api_secret=config.cloudinary_api_secret,
+                )
+                logger.info("Deleted video from Cloudinary", public_id=public_id)
     except Exception as exc:
         # Record failure
         error_msg = str(exc)
@@ -354,16 +419,17 @@ async def run_once() -> None:
         )
     )
 
-    # Delete the local video file now that it has been published
+    # Delete all local temp files now that the post is published
     try:
-        downloaded.file_path.unlink(missing_ok=True)
-        logger.info("Deleted local video file after successful post",
-                    file_path=str(downloaded.file_path),
+        downloaded.file_path.unlink(missing_ok=True)       # original video
+        if music_file:
+            music_file.unlink(missing_ok=True)              # music MP3
+        if upload_file_path != downloaded.file_path:
+            upload_file_path.unlink(missing_ok=True)        # merged video
+        logger.info("Deleted local temp files after successful post",
                     video_id=downloaded.video_id)
     except OSError as e:
-        # Non-fatal — log and continue; disk cleanup can be done manually
-        logger.warning("Failed to delete local video file",
-                       file_path=str(downloaded.file_path),
+        logger.warning("Failed to delete local temp files",
                        video_id=downloaded.video_id,
                        error=str(e))
 
