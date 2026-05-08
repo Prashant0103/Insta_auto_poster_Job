@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 @dataclass(slots=True)
 class VideoRecord:
     """Represents a video record in the state store."""
-    video_id: int
+    video_id: str
     query: str
     file_path: str
     source_url: str
@@ -83,7 +83,7 @@ class PostedStateStore:
         
         return self._with_lock(_load)
 
-    def used_ids(self) -> set[int]:
+    def used_ids(self) -> set[str]:
         """
         Get set of video IDs that have been used (downloaded, posted, or failed).
         
@@ -91,11 +91,17 @@ class PostedStateStore:
             Set of used video IDs
         """
         payload = self.load()
-        used = {
-            int(item['video_id'])
-            for item in payload.get('posted_videos', [])
-            if item.get('status') in {'posted', 'downloaded', 'failed'}
-        }
+        used: set[str] = set()
+        for item in payload.get('posted_videos', []):
+            if item.get('status') not in {'posted', 'downloaded', 'failed'}:
+                continue
+            raw_id = item.get('video_id')
+            if raw_id is None:
+                continue
+            video_id = str(raw_id)
+            used.add(video_id)
+            if video_id.isdigit():
+                used.add(f"pexels-{video_id}")
         
         logger.debug("Retrieved used video IDs", count=len(used))
         return used
@@ -128,6 +134,7 @@ class PostedStateStore:
                     'download_url': '',   # backwards-compat for old records
                     **item,
                 }
+                normalized['video_id'] = str(normalized.get('video_id', ''))
                 record = VideoRecord(**normalized)
                 
                 logger.info("Found pending download", 
@@ -163,7 +170,12 @@ class PostedStateStore:
                 item.get('attempts', 0) < max_attempts):
                 
                 try:
-                    record = VideoRecord(**item)
+                    normalized = {
+                        'download_url': '',
+                        **item,
+                        'video_id': str(item.get('video_id', '')),
+                    }
+                    record = VideoRecord(**normalized)
                     failed_records.append(record)
                 except (TypeError, ValueError) as e:
                     logger.error("Failed to parse failed record", 
@@ -189,7 +201,7 @@ class PostedStateStore:
                 # Find existing record
                 updated = False
                 for index, item in enumerate(records):
-                    if int(item['video_id']) == int(record.video_id):
+                    if str(item.get('video_id')) == str(record.video_id):
                         records[index] = asdict(record)
                         updated = True
                         logger.debug("Updated existing record", video_id=record.video_id)

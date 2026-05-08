@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional
 
-from pydantic import validator, Field
+from pydantic import validator, Field, model_validator
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 
@@ -12,11 +12,23 @@ from .exceptions import ConfigurationError
 
 class AppConfig(BaseSettings):
     """Application configuration with validation."""
+
+    # Video Source Selection
+    pexels_yn: str = Field("Y", description="Y/N flag for Pexels as a primary video source")
+    youtube_yn: str = Field("N", description="Y/N flag for YouTube as a primary video source")
     
     # Pexels Configuration
-    pexels_api_key: str = Field(..., description="Pexels API key")
-    pexels_query: str = Field(..., description="Search query for Pexels videos")
+    pexels_api_key: str = Field("", description="Pexels API key")
+    pexels_query: str = Field("nature,landscape,travel", description="Search query for Pexels videos")
     pexels_per_page: int = Field(20, ge=1, le=80, description="Number of videos per page")
+
+    # YouTube Configuration
+    youtube_api_key: str = Field("", description="YouTube Data API v3 key")
+    youtube_query: str = Field("viral shorts", description="Search query for YouTube videos")
+    youtube_max_results: int = Field(8, ge=1, le=50, description="Number of YouTube results to fetch")
+    youtube_max_duration_seconds: int = Field(60, ge=1, le=300, description="Maximum YouTube video duration")
+    youtube_min_like_count: int = Field(2_000_000, ge=0, description="Minimum YouTube like count")
+    youtube_format: str = Field("720", description="Maximum YouTube download quality")
 
     # Jamendo Music Configuration
     # Free client_id from: https://devportal.jamendo.com
@@ -71,6 +83,14 @@ class AppConfig(BaseSettings):
         if not v or not v.strip().isdigit():
             raise ValueError('IG_USER_ID must be a numeric Instagram account ID')
         return v.strip()
+
+    @validator('pexels_yn', 'youtube_yn')
+    def validate_source_flag(cls, v: str) -> str:
+        """Validate Y/N source flags."""
+        normalized = (v or "").strip().upper()
+        if normalized not in {"Y", "N"}:
+            raise ValueError("Source flags must be either Y or N")
+        return normalized
     
     @validator('min_aspect_ratio', 'max_aspect_ratio')
     def validate_aspect_ratios(cls, v: float, values: dict) -> float:
@@ -79,12 +99,19 @@ class AppConfig(BaseSettings):
             raise ValueError('max_aspect_ratio must be greater than min_aspect_ratio')
         return v
     
-    @validator('pexels_api_key')
-    def validate_pexels_api_key(cls, v: str) -> str:
-        """Validate Pexels API key format."""
-        if not v or len(v) < 10:
-            raise ValueError('Pexels API key must be at least 10 characters long')
-        return v
+    @model_validator(mode='after')
+    def validate_video_source_config(self) -> 'AppConfig':
+        """Validate that at least one primary source is enabled and usable."""
+        if self.pexels_yn != "Y" and self.youtube_yn != "Y":
+            raise ValueError("At least one video source flag must be Y")
+
+        if self.pexels_yn == "Y" and len((self.pexels_api_key or "").strip()) < 10:
+            raise ValueError("PEXELS_API_KEY must be set when PEXELS_YN=Y")
+
+        if self.youtube_yn == "Y" and len((self.youtube_api_key or "").strip()) < 10:
+            raise ValueError("YOUTUBE_API_KEY must be set when YOUTUBE_YN=Y")
+
+        return self
     
     @validator('log_level')
     def validate_log_level(cls, v: str) -> str:
@@ -125,6 +152,27 @@ class AppConfig(BaseSettings):
         if not self.instagram_music_queries:
             return []
         return [query.strip() for query in self.instagram_music_queries.split(',') if query.strip()]
+
+    @property
+    def youtube_query_value(self) -> str:
+        """Get the YouTube search query, falling back to the Pexels query."""
+        return self.youtube_query.strip() or self.pexels_query
+
+    @property
+    def video_source_order(self) -> List[str]:
+        """Return primary sources first, then configured fallback sources."""
+        flags = {
+            "pexels": self.pexels_yn,
+            "youtube": self.youtube_yn,
+        }
+        has_config = {
+            "pexels": len((self.pexels_api_key or "").strip()) >= 10,
+            "youtube": len((self.youtube_api_key or "").strip()) >= 10,
+        }
+
+        primary = [name for name, flag in flags.items() if flag == "Y" and has_config[name]]
+        fallback = [name for name, flag in flags.items() if flag != "Y" and has_config[name]]
+        return primary + fallback
 
 
 def load_config() -> AppConfig:

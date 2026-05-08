@@ -5,22 +5,20 @@ import random
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from .caption_builder import build_caption
 from .config import load_config, AppConfig
-from .downloader import DownloadedVideo, VideoDownloader
+from .downloader import DownloadedVideo
 from .instagram_api_client import InstagramAPIClient
 from .gist_sync import pull_state_from_gist, push_state_to_gist
 from .music_client import MusicClient
 from .video_processor import merge_video_with_music
-from .pexels_client import PexelsClient, PexelsVideo
+from .video_sources import find_and_download_video
 from .state_store import PostedStateStore, VideoRecord
 from .health_check import HealthChecker
 from .logging_config import setup_logging, get_logger, log_error
 from .exceptions import (
-    ConfigurationError, PexelsNoResultsError, InstagramError,
-    MediaProcessingError, AutoPosterError
+    ConfigurationError, InstagramError, MediaProcessingError, AutoPosterError
 )
 
 logger = get_logger(__name__)
@@ -34,39 +32,6 @@ def _build_downloaded_video(record: VideoRecord) -> DownloadedVideo:
         source_url=record.source_url,
         download_url=record.download_url,
     )
-
-
-def _is_instagram_friendly(
-    video: PexelsVideo, 
-    max_duration: int, 
-    min_ratio: float, 
-    max_ratio: float
-) -> bool:
-    """Check if video meets Instagram requirements."""
-    if video.duration <= 0 or video.duration > max_duration:
-        logger.debug("Video rejected for duration", 
-                    video_id=video.video_id,
-                    duration=video.duration,
-                    max_duration=max_duration)
-        return False
-    
-    ratio = video.aspect_ratio
-    if ratio < min_ratio or ratio > max_ratio:
-        logger.debug("Video rejected for aspect ratio", 
-                    video_id=video.video_id,
-                    aspect_ratio=ratio,
-                    min_ratio=min_ratio,
-                    max_ratio=max_ratio)
-        return False
-    
-    if video.width <= 0 or video.height <= 0:
-        logger.debug("Video rejected for invalid dimensions", 
-                    video_id=video.video_id,
-                    width=video.width,
-                    height=video.height)
-        return False
-    
-    return True
 
 
 async def run_health_check(config: AppConfig) -> bool:
@@ -192,67 +157,20 @@ async def run_once() -> None:
                    file_path=str(downloaded.file_path),
                    attempts=attempts)
     else:
-        # Search and download new video
-        logger.info("Searching for new video", query=config.pexels_query)
-        
-        async with PexelsClient(config.pexels_api_key) as pexels:
-            try:
-                videos = await pexels.search_videos(config.pexels_query, config.pexels_per_page)
-            except Exception as e:
-                log_error(e, {"context": "pexels_search", "query": config.pexels_query})
-                raise
-        
-        if not videos:
-            raise PexelsNoResultsError(f'No Pexels videos returned for query: {config.pexels_query}')
-
-        # Filter videos
-        used_ids = store.used_ids()
-        candidates = [
-            video for video in videos
-            if video.video_id not in used_ids
-            and _is_instagram_friendly(
-                video,
-                max_duration=config.max_video_duration_seconds,
-                min_ratio=config.min_aspect_ratio,
-                max_ratio=config.max_aspect_ratio,
-            )
-        ]
-        
-        logger.info("Filtered video candidates", 
-                   total_videos=len(videos),
-                   used_videos=len(used_ids),
-                   candidates=len(candidates))
-        
-        if not candidates:
-            raise PexelsNoResultsError(
-                'No Instagram-friendly unposted Pexels videos found in the fetched set.'
-            )
-
-        # Download chosen video
-        chosen_video = random.choice(candidates)
-        logger.info("Selected video for download", 
-                   video_id=chosen_video.video_id,
-                   duration=chosen_video.duration,
-                   dimensions=f"{chosen_video.width}x{chosen_video.height}")
-        
-        async with VideoDownloader(config.download_dir_path) as downloader:
-            try:
-                downloaded = await downloader.download(chosen_video)
-            except Exception as e:
-                log_error(e, {"context": "video_download", "video_id": chosen_video.video_id})
-                raise
+        # Search configured sources and download a new video.
+        logger.info("Searching for new video", source_order=config.video_source_order)
+        downloaded, query = await find_and_download_video(config, store.used_ids())
         
         # Generate content
         caption = build_caption(
             theme=config.caption_theme,
             hashtags=config.default_hashtags_list,
-            query=config.pexels_query,
+            query=query,
         )
         music_query = (
             random.choice(config.instagram_music_queries_list) 
             if config.instagram_music_queries_list else ''
         )
-        query = config.pexels_query
         source_url = downloaded.source_url
         download_url = downloaded.download_url
         downloaded_at = datetime.now().isoformat(timespec='seconds')
@@ -328,11 +246,11 @@ async def run_once() -> None:
             ig_user_id=config.ig_user_id,
             access_token=config.ig_access_token,
         ) as client:
-            if upload_file_path != downloaded.file_path:
+            if upload_file_path != downloaded.file_path or not downloaded.download_url:
                 # Upload merged video to transfer.sh — returns a public URL
                 from .transfer_sh_uploader import upload_to_transfer_sh
                 video_url = await upload_to_transfer_sh(upload_file_path)
-                logger.info("Merged video hosted at transfer.sh", url=video_url)
+                logger.info("Local video hosted at transfer.sh", url=video_url)
             else:
                 video_url = downloaded.download_url
 

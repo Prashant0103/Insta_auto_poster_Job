@@ -48,6 +48,21 @@ class PexelsNoResultsError(PexelsError):
     pass
 
 
+class YouTubeError(AutoPosterError):
+    """YouTube search or download errors."""
+    pass
+
+
+class YouTubeAPIError(YouTubeError):
+    """YouTube Data API request failures."""
+    pass
+
+
+class YouTubeNoResultsError(YouTubeError):
+    """No suitable videos found from YouTube."""
+    pass
+
+
 class StateStoreError(AutoPosterError):
     """State management errors."""
     pass

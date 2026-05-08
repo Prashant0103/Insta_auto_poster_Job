@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+import re
 
 import httpx
 
@@ -17,7 +18,7 @@ logger = get_logger(__name__)
 @dataclass(slots=True)
 class DownloadedVideo:
     """Represents a downloaded video file."""
-    video_id: int
+    video_id: str
     file_path: Path
     source_url: str
     download_url: str
@@ -56,7 +57,8 @@ class VideoDownloader:
             MediaProcessingError: If download fails
         """
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        file_path = self.download_dir / f'{timestamp}_{video.video_id}.mp4'
+        safe_video_id = re.sub(r'[^A-Za-z0-9_.-]+', '_', str(video.video_id))
+        file_path = self.download_dir / f'{timestamp}_{safe_video_id}.mp4'
         
         logger.info("Starting video download", 
                    video_id=video.video_id,

@@ -17,7 +17,7 @@ PEXELS_API_URL = 'https://api.pexels.com/videos/search'
 @dataclass(slots=True)
 class PexelsVideo:
     """Represents a video from Pexels API."""
-    video_id: int
+    video_id: str
     source_url: str
     download_url: str
     duration: int
@@ -127,7 +127,7 @@ class PexelsClient:
                     continue
                 
                 video = PexelsVideo(
-                    video_id=item['id'],
+                    video_id=f"pexels-{item['id']}",
                     source_url=item.get('url', ''),
                     download_url=file_info['link'],
                     duration=item.get('duration', 0),

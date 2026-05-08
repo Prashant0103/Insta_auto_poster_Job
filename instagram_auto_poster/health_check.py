@@ -129,6 +129,10 @@ class HealthChecker:
 
     async def _check_pexels_api(self) -> bool:
         """Check if Pexels API is accessible."""
+        if "pexels" not in self.config.video_source_order:
+            logger.info("Skipping Pexels health check; source is not configured")
+            return True
+
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(
