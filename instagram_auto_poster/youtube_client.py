@@ -17,12 +17,13 @@ from .logging_config import get_logger
 logger = get_logger(__name__)
 
 FORMAT_MAP: dict[str, str] = {
+    "0":    "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[acodec!=none]/best",
     "2160": "bestvideo[height<=2160][ext=mp4]+bestaudio[ext=m4a]/best[height<=2160][acodec!=none]/best[height<=2160]",
     "1440": "bestvideo[height<=1440][ext=mp4]+bestaudio[ext=m4a]/best[height<=1440][acodec!=none]/best[height<=1440]",
     "1080": "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][acodec!=none]/best[height<=1080]",
-    "720": "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][acodec!=none]/best[height<=720]",
-    "480": "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][acodec!=none]/best[height<=480]",
-    "360": "bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][acodec!=none]/best[height<=360]",
+    "720":  "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][acodec!=none]/best[height<=720]",
+    "480":  "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][acodec!=none]/best[height<=480]",
+    "360":  "bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][acodec!=none]/best[height<=360]",
     "best": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[acodec!=none]/best",
 }
 DOWNLOAD_CLIENTS = ["ios", "tv_embedded", "mweb", "android", "web"]
@@ -267,6 +268,7 @@ class YouTubeClient:
                 file_path=path,
                 source_url=video.source_url,
                 download_url="",
+                title=video.title,
             )
         except Exception as exc:
             message = str(exc).removeprefix("ERROR: ").strip()

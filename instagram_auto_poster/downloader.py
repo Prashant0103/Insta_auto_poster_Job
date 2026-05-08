@@ -22,6 +22,7 @@ class DownloadedVideo:
     file_path: Path
     source_url: str
     download_url: str
+    title: str = ""
 
 
 class VideoDownloader:

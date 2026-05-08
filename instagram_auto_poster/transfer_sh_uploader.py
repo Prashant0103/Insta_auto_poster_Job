@@ -19,46 +19,86 @@ from .logging_config import get_logger
 
 logger = get_logger(__name__)
 
-_TRANSFER_SH_URL = "https://transfer.sh"
+async def _try_transfer_sh(client: httpx.AsyncClient, file_path: Path) -> str:
+    response = await client.put(
+        f"https://transfer.sh/{file_path.name}",
+        content=file_path.read_bytes(),
+        headers={"Max-Days": "1"},
+    )
+    response.raise_for_status()
+    url = response.text.strip()
+    if not url.startswith("https://"):
+        raise ValueError(f"unexpected response: {url[:200]}")
+    return url
+
+
+async def _try_0x0(client: httpx.AsyncClient, file_path: Path) -> str:
+    with file_path.open("rb") as fh:
+        response = await client.post(
+            "https://0x0.st",
+            files={"file": (file_path.name, fh, "video/mp4")},
+        )
+    response.raise_for_status()
+    url = response.text.strip()
+    if not url.startswith("https://"):
+        raise ValueError(f"unexpected response: {url[:200]}")
+    return url
+
+
+async def _try_catbox(client: httpx.AsyncClient, file_path: Path) -> str:
+    with file_path.open("rb") as fh:
+        response = await client.post(
+            "https://catbox.moe/user/api.php",
+            data={"reqtype": "fileupload"},
+            files={"fileToUpload": (file_path.name, fh, "video/mp4")},
+        )
+    response.raise_for_status()
+    url = response.text.strip()
+    if not url.startswith("https://"):
+        raise ValueError(f"unexpected response: {url[:200]}")
+    return url
+
+
+async def _try_filebin(client: httpx.AsyncClient, file_path: Path) -> str:
+    import time
+    bin_id = f"igposter{int(time.time())}"
+    response = await client.post(
+        f"https://filebin.net/{bin_id}/{file_path.name}",
+        content=file_path.read_bytes(),
+        headers={"Content-Type": "video/mp4"},
+    )
+    response.raise_for_status()
+    url = f"https://filebin.net/{bin_id}/{file_path.name}"
+    return url
+
+
+_UPLOAD_SERVICES = [
+    ("transfer.sh", _try_transfer_sh),
+    ("0x0.st", _try_0x0),
+    ("catbox.moe", _try_catbox),
+    ("filebin.net", _try_filebin),
+]
 
 
 async def upload_to_transfer_sh(file_path: Path) -> str:
     """
-    Upload a file to transfer.sh and return its public HTTPS URL.
-
-    Args:
-        file_path: Local path to the file to upload.
-
-    Returns:
-        Public HTTPS URL valid for 14 days.
+    Upload a file to a public host and return its HTTPS URL.
+    Tries multiple services in order until one succeeds.
 
     Raises:
-        MediaProcessingError: If upload fails.
+        MediaProcessingError: If all upload attempts fail.
     """
-    upload_url = f"{_TRANSFER_SH_URL}/{file_path.name}"
+    logger.info("Uploading video to public host", path=str(file_path))
 
-    logger.info("Uploading merged video to transfer.sh", path=str(file_path))
+    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
+        for name, attempt in _UPLOAD_SERVICES:
+            try:
+                url = await attempt(client, file_path)
+                logger.info("Upload successful", service=name, url=url)
+                return url
+            except Exception as e:
+                logger.warning("Upload service failed, trying next", service=name, error=str(e))
 
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
-            with file_path.open("rb") as fh:
-                response = await client.put(
-                    upload_url,
-                    content=fh,
-                    headers={"Max-Days": "1"},   # expire after 1 day — minimum needed
-                )
-            response.raise_for_status()
-            public_url = response.text.strip()
-
-    except httpx.HTTPStatusError as e:
-        raise MediaProcessingError(
-            f"transfer.sh upload failed (HTTP {e.response.status_code})"
-        ) from e
-    except Exception as e:
-        raise MediaProcessingError(f"transfer.sh upload error: {e}") from e
-
-    if not public_url.startswith("https://"):
-        raise MediaProcessingError(f"transfer.sh returned unexpected response: {public_url[:200]}")
-
-    logger.info("transfer.sh upload successful", url=public_url)
-    return public_url
+    raise MediaProcessingError(
+        f"All upload services failed ({', '.join(n for n, _ in _UPLOAD_SERVICES)})"
+    )

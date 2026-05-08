@@ -28,14 +28,8 @@ class AppConfig(BaseSettings):
     youtube_max_results: int = Field(8, ge=1, le=50, description="Number of YouTube results to fetch")
     youtube_max_duration_seconds: int = Field(60, ge=1, le=300, description="Maximum YouTube video duration")
     youtube_min_like_count: int = Field(2_000_000, ge=0, description="Minimum YouTube like count")
-    youtube_format: str = Field("720", description="Maximum YouTube download quality")
+    youtube_format: str = Field("720", description="Max YouTube download quality (e.g. 1080, 720). Set to 0 for best available quality.")
 
-    # Jamendo Music Configuration
-    # Free client_id from: https://devportal.jamendo.com
-    jamendo_client_id: str = Field(..., description="Jamendo API client_id for background music")
-    music_query: str = Field("ambient relaxing cinematic", description="Space-separated tags for Jamendo music search")
-    music_volume: float = Field(0.8, ge=0.0, le=1.0, description="Background music volume (0.0–1.0)")
-    
     # Instagram Graph API Configuration
     ig_user_id: str = Field(..., description="Instagram Business/Creator account user ID")
     ig_access_token: str = Field(..., description="Instagram Graph API access token")
@@ -47,10 +41,7 @@ class AppConfig(BaseSettings):
     # Content Configuration
     caption_theme: str = Field(..., description="Theme for generated captions")
     default_hashtags: str = Field(..., description="Comma-separated default hashtags")
-    instagram_music_queries: str = Field("", description="Comma-separated music queries")
-    
     # Posting Configuration
-    allow_post_without_music: bool = Field(True, description="Allow posting without music")
     max_video_duration_seconds: int = Field(60, ge=1, le=300, description="Maximum video duration")
     min_aspect_ratio: float = Field(0.5, ge=0.1, le=10.0, description="Minimum aspect ratio")
     max_aspect_ratio: float = Field(2.0, ge=0.1, le=10.0, description="Maximum aspect ratio")
@@ -147,20 +138,23 @@ class AppConfig(BaseSettings):
         return [tag.strip() for tag in self.default_hashtags.split(',') if tag.strip()]
     
     @property
-    def instagram_music_queries_list(self) -> List[str]:
-        """Parse music queries from comma-separated string."""
-        if not self.instagram_music_queries:
-            return []
-        return [query.strip() for query in self.instagram_music_queries.split(',') if query.strip()]
+    def youtube_queries_list(self) -> List[str]:
+        """Parse YOUTUBE_QUERY into a list. Accepts [q1, q2] bracket format or plain string."""
+        raw = (self.youtube_query or "").strip()
+        if raw.startswith('[') and raw.endswith(']'):
+            queries = [q.strip() for q in raw[1:-1].split(',') if q.strip()]
+            return queries or [self.pexels_query]
+        return [raw] if raw else [self.pexels_query]
 
     @property
     def youtube_query_value(self) -> str:
-        """Get the YouTube search query, falling back to the Pexels query."""
-        return self.youtube_query.strip() or self.pexels_query
+        """First query in the list — used as a single-query fallback."""
+        queries = self.youtube_queries_list
+        return queries[0] if queries else self.pexels_query
 
     @property
     def video_source_order(self) -> List[str]:
-        """Return primary sources first, then configured fallback sources."""
+        """Return only sources explicitly enabled with Y flag."""
         flags = {
             "pexels": self.pexels_yn,
             "youtube": self.youtube_yn,
@@ -170,9 +164,7 @@ class AppConfig(BaseSettings):
             "youtube": len((self.youtube_api_key or "").strip()) >= 10,
         }
 
-        primary = [name for name, flag in flags.items() if flag == "Y" and has_config[name]]
-        fallback = [name for name, flag in flags.items() if flag != "Y" and has_config[name]]
-        return primary + fallback
+        return [name for name, flag in flags.items() if flag == "Y" and has_config[name]]
 
 
 def load_config() -> AppConfig:

@@ -95,9 +95,9 @@ class PexelsVideoSource:
 class YouTubeVideoSource:
     name = "youtube"
 
-    def __init__(self, config: AppConfig) -> None:
+    def __init__(self, config: AppConfig, query: str | None = None) -> None:
         self.config = config
-        self.query = config.youtube_query_value
+        self.query = query or config.youtube_query_value
         self.client = YouTubeClient(
             api_key=config.youtube_api_key,
             download_dir=config.download_dir_path,
@@ -116,28 +116,26 @@ class YouTubeVideoSource:
         return await self.client.download(video)  # type: ignore[arg-type]
 
 
-def build_video_sources(config: AppConfig) -> list[VideoSourceProvider]:
-    """Build source providers from config flags, primary first then fallback."""
-    providers = {
-        "pexels": PexelsVideoSource,
-        "youtube": YouTubeVideoSource,
-    }
+def build_video_sources(config: AppConfig, query: str | None = None) -> list[VideoSourceProvider]:
+    """Build source providers from config flags."""
     sources: list[VideoSourceProvider] = []
     for source_name in config.video_source_order:
-        provider_cls = providers.get(source_name)
-        if provider_cls:
-            sources.append(provider_cls(config))
+        if source_name == "youtube":
+            sources.append(YouTubeVideoSource(config, query))
+        elif source_name == "pexels":
+            sources.append(PexelsVideoSource(config))
     return sources
 
 
 async def find_and_download_video(
     config: AppConfig,
     used_ids: set[str],
+    query: str | None = None,
 ) -> tuple[DownloadedVideo, str]:
     """Try configured sources in order and return the first downloaded video."""
     source_errors: list[str] = []
 
-    for source in build_video_sources(config):
+    for source in build_video_sources(config, query):
         try:
             logger.info("Searching video source", source=source.name, query=source.query)
             videos = await source.search()

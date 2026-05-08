@@ -1,39 +1,46 @@
 from __future__ import annotations
 
 import random
-from datetime import datetime
+import re
 
 
-OPENERS = [
-    'A quiet moment from the wild.',
-    'Nature always finds a way to calm the soul.',
-    'Let this little escape slow your day down.',
-    'A peaceful frame from nature for your feed.',
-]
-
-MIDDLES = [
-    'Breathe in the stillness and let the noise fade away.',
-    'Soft light, open skies, and the kind of peace we all need.',
-    'A reminder that the most beautiful things are often the calmest.',
-    'Saving this moment of calm and sharing it with you.',
+ENGAGEMENT = [
+    "Follow for more content like this 🔥",
+    "Save this if it made you smile! 😄",
+    "Tag someone who would enjoy this 👇",
+    "Double tap if you loved this! ❤️",
+    "Share with someone who needs this today 🙌",
+    "Hit follow so you never miss a post! 🎯",
 ]
 
 CLOSERS = [
-    'What kind of nature content would you love to see next?',
-    'Take a pause, enjoy the view, and keep flowing gently.',
-    'May your day feel a little softer after this.',
-    'Here is your daily dose of calm from the natural world.',
+    "Comment your thoughts below! 💬",
+    "What do you think? Let us know! 👇",
+    "Like and follow for daily updates! 🎬",
+    "Turn on notifications so you never miss a post!",
+    "Follow for more amazing content every day!",
+    "Drop a comment — we read every one! 🙌",
 ]
 
 
-def build_caption(theme: str, hashtags: list[str], query: str) -> str:
-    date_label = datetime.now().strftime('%B %d, %Y')
+def _clean_title(title: str) -> str:
+    """Strip YouTube-specific noise so the title works as an Instagram hook."""
+    cleaned = re.sub(r'#\S+', '', title)                  # remove #shorts etc.
+    cleaned = re.sub(r'\[.*?\]|\(.*?\)', '', cleaned)     # remove [channel] / (official)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    # Capitalise first letter if not already
+    return cleaned[0].upper() + cleaned[1:] if cleaned else cleaned
+
+
+def build_caption(theme: str, hashtags: list[str], query: str, title: str = "") -> str:
     hashtag_text = ' '.join(f'#{tag.lstrip("#")}' for tag in hashtags)
+
+    hook = _clean_title(title) if title.strip() else f'Amazing {theme} content you cannot miss!'
+
     parts = [
-        random.choice(OPENERS),
-        f'{theme} inspired by {query} on {date_label}.',
-        random.choice(MIDDLES),
+        hook,
+        random.choice(ENGAGEMENT),
         random.choice(CLOSERS),
         hashtag_text,
     ]
-    return '\n\n'.join(parts)
+    return '\n\n'.join(p for p in parts if p)

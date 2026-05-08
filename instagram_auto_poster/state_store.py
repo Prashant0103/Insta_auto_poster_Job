@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, fields
 from pathlib import Path
 from typing import Any, List
 
@@ -11,6 +11,11 @@ from .exceptions import StateStoreError
 from .logging_config import get_logger
 
 logger = get_logger(__name__)
+
+
+def _to_video_record(data: dict) -> "VideoRecord":
+    known = {f.name for f in fields(VideoRecord)}
+    return VideoRecord(**{k: v for k, v in data.items() if k in known})
 
 
 @dataclass(slots=True)
@@ -24,7 +29,6 @@ class VideoRecord:
     downloaded_at: str
     posted_at: str
     caption: str
-    music_query: str
     status: str  # 'downloaded', 'posted', 'failed'
     attempts: int
     last_error: str
@@ -135,7 +139,7 @@ class PostedStateStore:
                     **item,
                 }
                 normalized['video_id'] = str(normalized.get('video_id', ''))
-                record = VideoRecord(**normalized)
+                record = _to_video_record(normalized)
                 
                 logger.info("Found pending download", 
                            video_id=record.video_id,
@@ -175,7 +179,7 @@ class PostedStateStore:
                         **item,
                         'video_id': str(item.get('video_id', '')),
                     }
-                    record = VideoRecord(**normalized)
+                    record = _to_video_record(normalized)
                     failed_records.append(record)
                 except (TypeError, ValueError) as e:
                     logger.error("Failed to parse failed record", 
@@ -185,6 +189,25 @@ class PostedStateStore:
         
         logger.debug("Retrieved failed records", count=len(failed_records))
         return failed_records
+
+    def delete_record(self, video_id: str) -> None:
+        def _delete():
+            try:
+                payload = self.load()
+                records = payload.get('posted_videos', [])
+                payload['posted_videos'] = [
+                    item for item in records if str(item.get('video_id')) != str(video_id)
+                ]
+                self.path.write_text(
+                    json.dumps(payload, indent=2, ensure_ascii=False),
+                    encoding='utf-8',
+                )
+                logger.info("Deleted video record", video_id=video_id)
+            except (OSError, ValueError) as e:
+                logger.error("Failed to delete record", video_id=video_id, error=str(e))
+                raise StateStoreError(f"Failed to delete record: {e}") from e
+
+        self._with_lock(_delete)
 
     def upsert_record(self, record: VideoRecord) -> None:
         """
