@@ -9,7 +9,7 @@ on:
 jobs:
   post:
     runs-on: ubuntu-latest
-    timeout-minutes: 15   # Kill if stuck (transcoding usually < 5 min)
+    timeout-minutes: 30   # 2 videos per run × ~10 min each (download + upload + post)
 
     steps:
       - name: Checkout code
@@ -26,15 +26,22 @@ jobs:
 
       - name: Run Instagram Auto Poster
         env:
-          # ── Pexels ─────────────────────────────────────────────────
+          # ── Video source flags ──────────────────────────────────────
+          PEXELS_YN: "N"
+          YOUTUBE_YN: "Y"
+
+          # ── Pexels (set PEXELS_YN=Y to activate) ───────────────────
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           PEXELS_QUERY: "nature,landscape,travel"
           PEXELS_PER_PAGE: "20"
 
-          # ── Jamendo Music ───────────────────────────────────────────
-          JAMENDO_CLIENT_ID: ${{ secrets.JAMENDO_CLIENT_ID }}
-          MUSIC_QUERY: "ambient relaxing cinematic"
-          MUSIC_VOLUME: "0.8"
+          # ── YouTube ─────────────────────────────────────────────────
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          YOUTUBE_QUERY: "[taarak mehta funny shorts,bhabhi ji ghar par hai funny shorts]"
+          YOUTUBE_MAX_RESULTS: "8"
+          YOUTUBE_MAX_DURATION_SECONDS: "60"
+          YOUTUBE_MIN_LIKE_COUNT: "10000"
+          YOUTUBE_FORMAT: "0"
 
           # ── Instagram Graph API ─────────────────────────────────────
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
@@ -49,8 +56,7 @@ jobs:
 
           # ── Content ─────────────────────────────────────────────────
           CAPTION_THEME: "inspirational"
-          DEFAULT_HASHTAGS: "#nature,#beautiful,#photography,#explore,#adventure"
-          INSTAGRAM_MUSIC_QUERIES: ""
+          DEFAULT_HASHTAGS: "#photography,#explore,#reelsindia,#shorts,#VIRALPOST,#instareels,#reels,#reelsinstagram"
 
           # ── Posting rules ───────────────────────────────────────────
           MAX_VIDEO_DURATION_SECONDS: "60"
