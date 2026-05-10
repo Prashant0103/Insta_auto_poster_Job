@@ -165,15 +165,29 @@ async def find_and_download_video(
                     f"No Instagram-friendly unposted videos found from {source.name}."
                 )
 
-            chosen_video = candidates[0] if source.name == "youtube" else random.choice(candidates)
-            logger.info(
-                "Selected video for download",
-                source=source.name,
-                video_id=chosen_video.video_id,
-                duration=chosen_video.duration,
-                dimensions=f"{chosen_video.width}x{chosen_video.height}",
-            )
-            return await source.download(chosen_video), source.query
+            download_errors: list[str] = []
+            ordered = candidates if source.name == "youtube" else [random.choice(candidates)]
+            for chosen_video in ordered:
+                logger.info(
+                    "Selected video for download",
+                    source=source.name,
+                    video_id=chosen_video.video_id,
+                    duration=chosen_video.duration,
+                    dimensions=f"{chosen_video.width}x{chosen_video.height}",
+                )
+                try:
+                    return await source.download(chosen_video), source.query
+                except Exception as dl_exc:
+                    download_errors.append(f"{chosen_video.video_id}: {dl_exc}")
+                    logger.warning(
+                        "Download failed for candidate, trying next",
+                        source=source.name,
+                        video_id=chosen_video.video_id,
+                        error=str(dl_exc),
+                    )
+
+            last_err = download_errors[-1] if download_errors else "no candidates"
+            raise Exception(f"All candidates failed. Last error: {last_err}")
         except Exception as exc:
             source_errors.append(f"{source.name}: {exc}")
             logger.warning(

@@ -410,30 +410,33 @@ def _is_bot_detection_error(message: str) -> bool:
 
 
 def _fetch_invidious_instances() -> list[str]:
-    """Fetch live API-enabled Invidious instances from the public registry."""
+    """Fetch live API-enabled Invidious instances and merge with fallback list."""
+    registry_instances: list[str] = []
     try:
         with httpx.Client(timeout=10.0) as client:
             resp = client.get("https://api.invidious.io/instances.json")
-            if resp.status_code != 200:
-                return _INVIDIOUS_FALLBACK_INSTANCES
-            instances = []
-            for entry in resp.json():
-                if not isinstance(entry, list) or len(entry) < 2:
-                    continue
-                info = entry[1]
-                if (
-                    isinstance(info, dict)
-                    and info.get("api") is True
-                    and info.get("type") == "https"
-                ):
-                    uri = info.get("uri", "").rstrip("/")
-                    if uri:
-                        instances.append(uri)
-            logger.info("Fetched Invidious instances from registry", count=len(instances))
-            return instances if instances else _INVIDIOUS_FALLBACK_INSTANCES
+            if resp.status_code == 200:
+                for entry in resp.json():
+                    if not isinstance(entry, list) or len(entry) < 2:
+                        continue
+                    info = entry[1]
+                    if (
+                        isinstance(info, dict)
+                        and info.get("api") is True
+                        and info.get("type") == "https"
+                    ):
+                        uri = info.get("uri", "").rstrip("/")
+                        if uri:
+                            registry_instances.append(uri)
     except Exception as e:
-        logger.warning("Failed to fetch Invidious registry, using fallback list", error=str(e))
-        return _INVIDIOUS_FALLBACK_INSTANCES
+        logger.warning("Failed to fetch Invidious registry", error=str(e))
+
+    # Merge: registry first, then fallback entries not already included
+    seen = set(registry_instances)
+    combined = registry_instances + [i for i in _INVIDIOUS_FALLBACK_INSTANCES if i not in seen]
+    logger.info("Invidious instance list ready", registry=len(registry_instances),
+                fallback=len(combined) - len(registry_instances), total=len(combined))
+    return combined
 
 
 def _download_via_invidious(raw_video_id: str, dest_path: Path) -> Path | None:
