@@ -29,15 +29,18 @@ FORMAT_MAP: dict[str, str] = {
 DOWNLOAD_CLIENTS = ["android_vr", "android", "ios", "tv_embedded", "mweb", "web"]
 YOUTUBE_API_BASE_URL = "https://www.googleapis.com/youtube/v3"
 _INVIDIOUS_FALLBACK_INSTANCES = [
+    "https://yewtu.be",
+    "https://vid.puffyan.us",
+    "https://invidious.kavin.rocks",
+    "https://inv.riverside.rocks",
+    "https://invidious.flokinet.to",
+    "https://invidious.esmailelbob.xyz",
     "https://inv.nadeko.net",
-    "https://invidious.privacyredirect.com",
-    "https://iv.datura.network",
     "https://invidious.nerdvpn.de",
-    "https://yt.artemislena.eu",
-    "https://invidious.materialio.us",
     "https://invidious.protokolla.fi",
-    "https://invidious.drgns.space",
     "https://inv.tux.pizza",
+    "https://invidious.materialio.us",
+    "https://invidious.privacyredirect.com",
 ]
 
 
@@ -451,6 +454,11 @@ def _download_via_invidious(raw_video_id: str, dest_path: Path) -> Path | None:
                 if resp.status_code != 200:
                     logger.warning("Invidious instance returned non-200",
                                    instance=instance, status=resp.status_code)
+                    continue
+                body = resp.text.strip()
+                if not body or not body.startswith("{"):
+                    logger.warning("Invidious instance returned non-JSON body",
+                                   instance=instance, preview=body[:80])
                     continue
                 data = resp.json()
 

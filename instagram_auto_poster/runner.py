@@ -242,9 +242,10 @@ async def _post_single(
 
 
 def _write_credentials_from_env() -> None:
-    """Write token.json from GOOGLE_DRIVE_TOKEN_B64 env var if set (Railway/CI use)."""
+    """Write credential files from base64 env vars if set (Railway/Render/CI use)."""
     import base64
     import os
+
     token_b64 = os.environ.get("GOOGLE_DRIVE_TOKEN_B64", "").strip()
     token_file = os.environ.get("GOOGLE_DRIVE_TOKEN_FILE", "token.json")
     if token_b64 and not Path(token_file).exists():
@@ -253,6 +254,16 @@ def _write_credentials_from_env() -> None:
             print(f"Written Google Drive token to {token_file}")
         except Exception as e:
             print(f"Warning: failed to write Google Drive token: {e}")
+
+    cookies_b64 = os.environ.get("YOUTUBE_COOKIES_B64", "").strip()
+    cookies_file = os.environ.get("YOUTUBE_COOKIES_FILE", "/tmp/yt_cookies.txt")
+    if cookies_b64 and not Path(cookies_file).exists():
+        try:
+            Path(cookies_file).parent.mkdir(parents=True, exist_ok=True)
+            Path(cookies_file).write_bytes(base64.b64decode(cookies_b64))
+            print(f"Written YouTube cookies to {cookies_file}")
+        except Exception as e:
+            print(f"Warning: failed to write YouTube cookies: {e}")
 
 
 async def run_once() -> None:
