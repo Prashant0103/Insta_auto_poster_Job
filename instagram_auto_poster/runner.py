@@ -13,6 +13,7 @@ from .gist_sync import pull_state_from_gist, push_state_to_gist
 from .video_sources import find_and_download_video
 from .state_store import PostedStateStore, VideoRecord
 from .video_id_store import VideoIdStore
+from .youtube_client import YouTubeClient
 from .health_check import HealthChecker
 from .logging_config import setup_logging, get_logger, log_error
 from .exceptions import (
@@ -255,6 +256,92 @@ async def _post_single(
     await _push_gist(config)
 
 
+async def _post_direct_video_id(
+    config: AppConfig,
+    store: PostedStateStore,
+    video_id_store: VideoIdStore,
+    raw_video_id: str,
+) -> None:
+    """Download and post a specific YouTube video ID, bypassing search."""
+    logger.info("Direct VIDEO_ID mode — skipping search", raw_video_id=raw_video_id)
+
+    yt_client = YouTubeClient(
+        api_key=config.youtube_api_key,
+        download_dir=config.download_dir_path,
+        format_id=config.youtube_format,
+        cookies_file=config.youtube_cookies_file,
+    )
+    downloaded = await yt_client.download_by_id(raw_video_id)
+
+    caption = build_caption_from_youtube(
+        title=downloaded.title,
+        description=downloaded.description,
+        hashtags=config.default_hashtags_list,
+    )
+    query = raw_video_id
+    source_url = downloaded.source_url
+    downloaded_at = datetime.now().isoformat(timespec='seconds')
+
+    store.upsert_record(VideoRecord(
+        video_id=downloaded.video_id,
+        query=query,
+        file_path=str(downloaded.file_path),
+        source_url=source_url,
+        download_url="",
+        downloaded_at=downloaded_at,
+        posted_at='',
+        caption=caption,
+        status='downloaded',
+        attempts=0,
+        last_error='',
+    ))
+
+    async with InstagramAPIClient(
+        ig_user_id=config.ig_user_id,
+        access_token=config.ig_access_token,
+    ) as client:
+        from .transfer_sh_uploader import upload_to_transfer_sh
+        video_url = await upload_to_transfer_sh(downloaded.file_path, config)
+        logger.info("Direct video hosted at public host", url=video_url)
+
+        logger.info("Posting direct video to Instagram",
+                    video_url=video_url,
+                    caption_length=len(caption),
+                    caption_preview=caption[:120].replace("\n", "\\n"))
+
+        media_id = await client.create_and_publish(
+            video_url=video_url,
+            caption=caption,
+            media_type="REELS",
+            share_to_feed=True,
+        )
+        logger.info("Instagram post created (direct VIDEO_ID)", media_id=media_id)
+
+    posted_at_ts = datetime.now().isoformat(timespec='seconds')
+    store.upsert_record(VideoRecord(
+        video_id=downloaded.video_id,
+        query=query,
+        file_path=str(downloaded.file_path),
+        source_url=source_url,
+        download_url=video_url,
+        downloaded_at=downloaded_at,
+        posted_at=posted_at_ts,
+        caption=caption,
+        status='posted',
+        attempts=1,
+        last_error='',
+    ))
+    video_id_store.add(downloaded.video_id, posted_at_ts)
+
+    try:
+        downloaded.file_path.unlink(missing_ok=True)
+    except OSError as e:
+        logger.warning("Failed to delete local temp file", video_id=downloaded.video_id, error=str(e))
+
+    logger.info("Direct VIDEO_ID post completed", video_id=downloaded.video_id)
+    await _push_gist(config)
+
+
 def _write_credentials_from_env() -> None:
     """Write credential files from base64 env vars if set (Railway/Render/CI use)."""
     import base64
@@ -307,6 +394,11 @@ async def run_once() -> None:
         )
     else:
         logger.debug("Gist sync not configured — using local state only")
+
+    # Direct video override: if VIDEO_ID is set, skip search entirely
+    if config.video_id and config.video_id.strip():
+        await _post_direct_video_id(config, store, video_id_store, config.video_id.strip())
+        return
 
     # Retry any pending/failed record first (one per run)
     pending = _find_pending_or_retry(store)

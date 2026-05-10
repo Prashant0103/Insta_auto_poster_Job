@@ -55,6 +55,9 @@ class AppConfig(BaseSettings):
     # SQLite video ID dedup store — persisted on Railway Volume at /data
     video_id_db: str = Field("/data/videos.db", description="SQLite DB path for posted video IDs (use /data/videos.db on Railway)")
 
+    # Direct video override — when set, skip search and post this YouTube video ID
+    video_id: Optional[str] = Field(None, description="YouTube video ID to post directly (bypasses search)")
+
     # YouTube published-date filter — skip videos older than this date (DD-MM-YYYY)
     check_published_date: Optional[str] = Field(None, description="Only include YouTube videos published on or after this date (DD-MM-YYYY)")
 
