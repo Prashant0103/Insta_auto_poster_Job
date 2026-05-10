@@ -102,6 +102,7 @@ class YouTubeVideoSource:
             api_key=config.youtube_api_key,
             download_dir=config.download_dir_path,
             format_id=config.youtube_format,
+            cookies_file=config.youtube_cookies_file,
         )
 
     async def search(self) -> list[YouTubeVideo]:

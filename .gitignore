@@ -5,6 +5,8 @@ __pycache__/
 
 # Environment & secrets
 .env
+service_account.json
+token.json
 
 # Runtime data (never commit — state is stored in GitHub Gist on Render)
 posted_videos.json

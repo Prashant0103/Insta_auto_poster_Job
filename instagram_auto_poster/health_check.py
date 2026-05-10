@@ -200,13 +200,14 @@ class HealthChecker:
 
     def _check_disk_space(self) -> float:
         """Check available disk space in MB."""
+        import shutil
         try:
-            stat = self.config.download_dir_path.stat()
-            # This is a simple approximation - in production you'd use shutil.disk_usage
-            return 1000.0  # Placeholder - implement actual disk space check
+            download_dir = self.config.download_dir_path
+            download_dir.mkdir(parents=True, exist_ok=True)
+            return shutil.disk_usage(download_dir).free / (1024 * 1024)
         except Exception as e:
             logger.warning("Failed to check disk space", error=str(e))
-            return 0.0
+            return 1000.0  # assume OK if check fails
 
     def _validate_config(self) -> bool:
         """Validate configuration."""

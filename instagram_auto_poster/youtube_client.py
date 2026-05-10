@@ -55,11 +55,12 @@ class YouTubeVideo:
 class YouTubeClient:
     """YouTube search and download client using the YT_Downloader approach."""
 
-    def __init__(self, api_key: str, download_dir: Path, format_id: str = "720") -> None:
+    def __init__(self, api_key: str, download_dir: Path, format_id: str = "720", cookies_file: str = "") -> None:
         self.api_key = api_key
         self.download_dir = download_dir
         self.download_dir.mkdir(parents=True, exist_ok=True)
         self.format_id = format_id if format_id in FORMAT_MAP else "720"
+        self.cookies_file = cookies_file
 
     async def search_shorts(
         self,
@@ -241,6 +242,9 @@ class YouTubeClient:
                 "concurrent_fragment_downloads": 4,
             }
         )
+        if self.cookies_file and Path(self.cookies_file).exists():
+            opts["cookiefile"] = self.cookies_file
+            logger.info("Using cookies file for YouTube download", path=self.cookies_file)
 
         logger.info(
             "Starting YouTube download",

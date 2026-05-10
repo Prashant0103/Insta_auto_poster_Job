@@ -80,15 +80,33 @@ _UPLOAD_SERVICES = [
 ]
 
 
-async def upload_to_transfer_sh(file_path: Path) -> str:
+async def _try_google_drive(file_path: Path, config) -> str:
+    from .google_drive_client import GoogleDriveUploader
+    uploader = GoogleDriveUploader(
+        token_file=config.google_drive_token_file,
+        folder_id=config.google_drive_folder_id,
+    )
+    return await uploader.upload(file_path)
+
+
+async def upload_to_transfer_sh(file_path: Path, config=None) -> str:
     """
     Upload a file to a public host and return its HTTPS URL.
-    Tries multiple services in order until one succeeds.
+    Tries Google Drive first (when configured), then falls back to free services.
 
     Raises:
         MediaProcessingError: If all upload attempts fail.
     """
     logger.info("Uploading video to public host", path=str(file_path))
+
+    if config is not None and (config.google_drive_folder_id or "").strip():
+        try:
+            url = await _try_google_drive(file_path, config)
+            logger.info("Upload successful", service="google_drive", url=url)
+            return url
+        except Exception as e:
+            logger.warning("Google Drive upload failed, falling back to public services",
+                           error=str(e))
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
         for name, attempt in _UPLOAD_SERVICES:
@@ -100,5 +118,5 @@ async def upload_to_transfer_sh(file_path: Path) -> str:
                 logger.warning("Upload service failed, trying next", service=name, error=str(e))
 
     raise MediaProcessingError(
-        f"All upload services failed ({', '.join(n for n, _ in _UPLOAD_SERVICES)})"
+        f"All upload services failed (google_drive, {', '.join(n for n, _ in _UPLOAD_SERVICES)})"
     )

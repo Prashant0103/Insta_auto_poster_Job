@@ -9,7 +9,7 @@ on:
 jobs:
   post:
     runs-on: ubuntu-latest
-    timeout-minutes: 30   # 2 videos per run × ~10 min each (download + upload + post)
+    timeout-minutes: 30   # 2 videos per run x ~10 min each (download + upload + post)
 
     steps:
       - name: Checkout code
@@ -24,46 +24,69 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Write YouTube cookies
+        run: |
+          if [ -n "${{ secrets.YOUTUBE_COOKIES_B64 }}" ]; then
+            echo "${{ secrets.YOUTUBE_COOKIES_B64 }}" | base64 -d > /tmp/yt_cookies.txt
+            echo "Cookies file written"
+          else
+            echo "No cookies secret set -- skipping"
+          fi
+
+      - name: Write Google Drive token
+        run: |
+          if [ -n "${{ secrets.GOOGLE_DRIVE_TOKEN_B64 }}" ]; then
+            echo "${{ secrets.GOOGLE_DRIVE_TOKEN_B64 }}" | base64 -d > /tmp/gdrive_token.json
+            echo "Google Drive token written"
+          else
+            echo "No Google Drive token secret set -- skipping"
+          fi
+
       - name: Run Instagram Auto Poster
         env:
-          # ── Video source flags ──────────────────────────────────────
+          # Video source flags
           PEXELS_YN: "N"
           YOUTUBE_YN: "Y"
 
-          # ── Pexels (set PEXELS_YN=Y to activate) ───────────────────
+          # Pexels (set PEXELS_YN=Y to activate)
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           PEXELS_QUERY: "nature,landscape,travel"
           PEXELS_PER_PAGE: "20"
 
-          # ── YouTube ─────────────────────────────────────────────────
+          # YouTube
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           YOUTUBE_QUERY: "[taarak mehta funny shorts,bhabhi ji ghar par hai funny shorts]"
           YOUTUBE_MAX_RESULTS: "8"
           YOUTUBE_MAX_DURATION_SECONDS: "60"
           YOUTUBE_MIN_LIKE_COUNT: "10000"
           YOUTUBE_FORMAT: "0"
+          YOUTUBE_COOKIES_FILE: "/tmp/yt_cookies.txt"
 
-          # ── Instagram Graph API ─────────────────────────────────────
+          # Instagram Graph API
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
           IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
 
-          # ── GitHub Gist state sync ──────────────────────────────────
-          # GH_PAT must NOT be named GITHUB_TOKEN — that name is reserved
+          # GitHub Gist state sync
+          # GH_PAT must NOT be named GITHUB_TOKEN -- that name is reserved
           # by GitHub Actions and gets overridden with a repo-scoped token
           # that cannot write to Gists.
           GH_PAT: ${{ secrets.GH_PAT }}
           STATE_GIST_ID: ${{ secrets.STATE_GIST_ID }}
 
-          # ── Content ─────────────────────────────────────────────────
+          # Content
           CAPTION_THEME: "inspirational"
           DEFAULT_HASHTAGS: "#photography,#explore,#reelsindia,#shorts,#VIRALPOST,#instareels,#reels,#reelsinstagram"
 
-          # ── Posting rules ───────────────────────────────────────────
+          # Posting rules
           MAX_VIDEO_DURATION_SECONDS: "60"
           MIN_ASPECT_RATIO: "0.5"
           MAX_ASPECT_RATIO: "2.0"
 
-          # ── Logging ─────────────────────────────────────────────────
+          # Google Drive video hosting
+          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+          GOOGLE_DRIVE_TOKEN_FILE: "/tmp/gdrive_token.json"
+
+          # Logging
           LOG_LEVEL: "INFO"
 
         run: python main.py

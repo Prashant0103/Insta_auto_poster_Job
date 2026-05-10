@@ -175,7 +175,7 @@ async def _post_single(
         ) as client:
             if not downloaded.download_url:
                 from .transfer_sh_uploader import upload_to_transfer_sh
-                video_url = await upload_to_transfer_sh(downloaded.file_path)
+                video_url = await upload_to_transfer_sh(downloaded.file_path, config)
                 logger.info("Local video hosted at public host", url=video_url)
             else:
                 video_url = downloaded.download_url
