@@ -26,8 +26,18 @@ FORMAT_MAP: dict[str, str] = {
     "360":  "bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][acodec!=none]/best[height<=360]",
     "best": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[acodec!=none]/best",
 }
-DOWNLOAD_CLIENTS = ["ios", "tv_embedded", "mweb", "android", "web"]
+DOWNLOAD_CLIENTS = ["android_vr", "android", "ios", "tv_embedded", "mweb", "web"]
 YOUTUBE_API_BASE_URL = "https://www.googleapis.com/youtube/v3"
+
+
+def _build_js_runtimes() -> dict:
+    runtimes: dict = {}
+    if shutil.which("deno"):
+        runtimes["deno"] = {}
+    node_path = shutil.which("node")
+    if node_path:
+        runtimes["node"] = {"path": node_path}
+    return runtimes
 
 
 @dataclass(slots=True)
@@ -299,6 +309,10 @@ def _base_yt_dlp_opts() -> dict:
         "buffersize": 1024 * 1024,
         "http_chunk_size": 10 * 1024 * 1024,
     }
+
+    js_runtimes = _build_js_runtimes()
+    if js_runtimes:
+        opts["js_runtimes"] = js_runtimes
 
     ffmpeg_path = _ffmpeg_path()
     if ffmpeg_path:
