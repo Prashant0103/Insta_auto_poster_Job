@@ -5,7 +5,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from .caption_builder import build_caption
+from .caption_builder import build_caption, build_caption_from_youtube
 from .config import load_config, AppConfig
 from .downloader import DownloadedVideo
 from .instagram_api_client import InstagramAPIClient
@@ -139,12 +139,19 @@ async def _post_single(
         logger.info("Searching for new video", query=query, source_order=config.video_source_order)
         downloaded, query = await find_and_download_video(config, store.used_ids(), query=query)
 
-        caption = build_caption(
-            theme=config.caption_theme,
-            hashtags=config.default_hashtags_list,
-            query=query,
-            title=downloaded.title,
-        )
+        if downloaded.video_id.startswith("youtube-"):
+            caption = build_caption_from_youtube(
+                title=downloaded.title,
+                description=downloaded.description,
+                hashtags=config.default_hashtags_list,
+            )
+        else:
+            caption = build_caption(
+                theme=config.caption_theme,
+                hashtags=config.default_hashtags_list,
+                query=query,
+                title=downloaded.title,
+            )
         source_url = downloaded.source_url
         download_url = downloaded.download_url
         downloaded_at = datetime.now().isoformat(timespec='seconds')

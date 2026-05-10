@@ -65,6 +65,7 @@ class YouTubeVideo:
     width: int = 1080
     height: int = 1920
     title: str = ""
+    description: str = ""
     channel: str = ""
     published_at: str = ""
     like_count: int = 0
@@ -107,6 +108,7 @@ class YouTubeClient:
                 download_url="",
                 duration=item["durationSeconds"],
                 title=item["title"],
+                description=item["description"],
                 channel=item["channelTitle"],
                 published_at=item["publishedAt"],
                 like_count=item["likeCount"],
@@ -162,10 +164,19 @@ class YouTubeClient:
                 if like_count < min_like_count:
                     continue
 
+                localized = detail_snippet.get("localized", {})
                 filtered.append(
                     {
                         "videoId": raw_id,
-                        "title": detail_snippet.get("title") or snippet.get("title", ""),
+                        "title": (
+                            localized.get("title")
+                            or detail_snippet.get("title")
+                            or snippet.get("title", "")
+                        ),
+                        "description": (
+                            localized.get("description")
+                            or detail_snippet.get("description", "")
+                        ),
                         "channelTitle": (
                             detail_snippet.get("channelTitle")
                             or snippet.get("channelTitle", "")
@@ -297,6 +308,7 @@ class YouTubeClient:
                 source_url=video.source_url,
                 download_url="",
                 title=video.title,
+                description=video.description,
             )
         except Exception as exc:
             message = str(exc).removeprefix("ERROR: ").strip()
@@ -322,6 +334,7 @@ class YouTubeClient:
                         source_url=video.source_url,
                         download_url="",
                         title=video.title,
+                        description=video.description,
                     )
             logger.error("YouTube download failed", video_id=video.video_id, error=message)
             raise MediaProcessingError(f"YouTube download failed: {message}") from exc
