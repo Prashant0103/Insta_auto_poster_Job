@@ -125,93 +125,117 @@ class YouTubeClient:
         max_duration_seconds: int,
         min_like_count: int,
         min_published_date: datetime | None = None,
+        max_pages: int = 3,
     ) -> list[dict]:
         """
         Return filtered YouTube Shorts candidates sorted by likeCount desc.
 
-        YouTube has no direct Shorts API filter, so this treats videos with
-        duration <= max_duration_seconds as Shorts candidates.
+        Paginates through up to max_pages result pages when the current page
+        yields zero filtered candidates, so filters (date, duration, likes)
+        don't silently exhaust a small first batch.
         """
         try:
             async with httpx.AsyncClient(timeout=20.0) as client:
-                search_items = await self._search_videos(client, query, max_results)
+                filtered: list[dict] = []
+                page_token: str | None = None
+                total_discovered = 0
 
-                if not search_items:
-                    raise YouTubeNoResultsError(f"No YouTube videos returned for query: {query}")
-
-                video_ids = [
-                    item.get("id", {}).get("videoId", "")
-                    for item in search_items
-                    if item.get("id", {}).get("videoId")
-                ]
-                details_by_id = await self._fetch_video_details(client, video_ids)
-
-            filtered = []
-            for item in search_items:
-                raw_id = item.get("id", {}).get("videoId", "")
-                details = details_by_id.get(raw_id)
-                if not details:
-                    continue
-
-                snippet = item.get("snippet", {})
-                detail_snippet = details.get("snippet", {})
-                content_details = details.get("contentDetails", {})
-                statistics = details.get("statistics", {})
-                duration_seconds = _parse_iso_duration_seconds(
-                    content_details.get("duration", "")
-                )
-                like_count = _parse_int(statistics.get("likeCount"))
-
-                if duration_seconds <= 0 or duration_seconds > max_duration_seconds:
-                    continue
-                if like_count < min_like_count:
-                    continue
-                if min_published_date is not None:
-                    raw_published = (
-                        detail_snippet.get("publishedAt")
-                        or snippet.get("publishedAt", "")
+                for page in range(max_pages):
+                    search_items, page_token = await self._search_videos(
+                        client, query, max_results, page_token
                     )
-                    try:
-                        published_dt = datetime.fromisoformat(
-                            raw_published.replace("Z", "+00:00")
-                        ).replace(tzinfo=None)
-                    except (ValueError, AttributeError):
-                        published_dt = None
-                    if published_dt is None or published_dt < min_published_date:
-                        continue
 
-                localized = detail_snippet.get("localized", {})
-                filtered.append(
-                    {
-                        "videoId": raw_id,
-                        "title": (
-                            localized.get("title")
-                            or detail_snippet.get("title")
-                            or snippet.get("title", "")
-                        ),
-                        "description": (
-                            localized.get("description")
-                            or detail_snippet.get("description", "")
-                        ),
-                        "channelTitle": (
-                            detail_snippet.get("channelTitle")
-                            or snippet.get("channelTitle", "")
-                        ),
-                        "publishedAt": (
-                            detail_snippet.get("publishedAt")
-                            or snippet.get("publishedAt", "")
-                        ),
-                        "durationSeconds": duration_seconds,
-                        "likeCount": like_count,
-                        "url": f"https://www.youtube.com/shorts/{raw_id}",
-                    }
-                )
+                    if not search_items:
+                        if page == 0:
+                            raise YouTubeNoResultsError(
+                                f"No YouTube videos returned for query: {query}"
+                            )
+                        break
+
+                    total_discovered += len(search_items)
+                    video_ids = [
+                        item.get("id", {}).get("videoId", "")
+                        for item in search_items
+                        if item.get("id", {}).get("videoId")
+                    ]
+                    details_by_id = await self._fetch_video_details(client, video_ids)
+
+                    for item in search_items:
+                        raw_id = item.get("id", {}).get("videoId", "")
+                        details = details_by_id.get(raw_id)
+                        if not details:
+                            continue
+
+                        snippet = item.get("snippet", {})
+                        detail_snippet = details.get("snippet", {})
+                        content_details = details.get("contentDetails", {})
+                        statistics = details.get("statistics", {})
+                        duration_seconds = _parse_iso_duration_seconds(
+                            content_details.get("duration", "")
+                        )
+                        like_count = _parse_int(statistics.get("likeCount"))
+
+                        if duration_seconds <= 0 or duration_seconds > max_duration_seconds:
+                            continue
+                        if like_count < min_like_count:
+                            continue
+                        if min_published_date is not None:
+                            raw_published = (
+                                detail_snippet.get("publishedAt")
+                                or snippet.get("publishedAt", "")
+                            )
+                            try:
+                                published_dt = datetime.fromisoformat(
+                                    raw_published.replace("Z", "+00:00")
+                                ).replace(tzinfo=None)
+                            except (ValueError, AttributeError):
+                                published_dt = None
+                            if published_dt is None or published_dt < min_published_date:
+                                continue
+
+                        localized = detail_snippet.get("localized", {})
+                        filtered.append(
+                            {
+                                "videoId": raw_id,
+                                "title": (
+                                    localized.get("title")
+                                    or detail_snippet.get("title")
+                                    or snippet.get("title", "")
+                                ),
+                                "description": (
+                                    localized.get("description")
+                                    or detail_snippet.get("description", "")
+                                ),
+                                "channelTitle": (
+                                    detail_snippet.get("channelTitle")
+                                    or snippet.get("channelTitle", "")
+                                ),
+                                "publishedAt": (
+                                    detail_snippet.get("publishedAt")
+                                    or snippet.get("publishedAt", "")
+                                ),
+                                "durationSeconds": duration_seconds,
+                                "likeCount": like_count,
+                                "url": f"https://www.youtube.com/shorts/{raw_id}",
+                            }
+                        )
+
+                    logger.info(
+                        "YouTube page fetched",
+                        query=query,
+                        page=page + 1,
+                        page_results=len(search_items),
+                        filtered_so_far=len(filtered),
+                    )
+
+                    if filtered or not page_token:
+                        break
 
             filtered.sort(key=lambda item: item["likeCount"], reverse=True)
             logger.info(
                 "YouTube Shorts filtering completed",
                 query=query,
-                discovered=len(search_items),
+                discovered=total_discovered,
                 filtered=len(filtered),
                 max_duration_seconds=max_duration_seconds,
                 min_like_count=min_like_count,
@@ -245,19 +269,21 @@ class YouTubeClient:
         client: httpx.AsyncClient,
         query: str,
         max_results: int,
-    ) -> list[dict]:
-        response = await client.get(
-            f"{YOUTUBE_API_BASE_URL}/search",
-            params={
-                "part": "snippet",
-                "q": query,
-                "type": "video",
-                "maxResults": max_results,
-                "key": self.api_key,
-            },
-        )
+        page_token: str | None = None,
+    ) -> tuple[list[dict], str | None]:
+        params: dict = {
+            "part": "snippet",
+            "q": query,
+            "type": "video",
+            "maxResults": max_results,
+            "key": self.api_key,
+        }
+        if page_token:
+            params["pageToken"] = page_token
+        response = await client.get(f"{YOUTUBE_API_BASE_URL}/search", params=params)
         response.raise_for_status()
-        return response.json().get("items", [])
+        data = response.json()
+        return data.get("items", []), data.get("nextPageToken")
 
     async def _fetch_video_details(
         self,
