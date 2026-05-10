@@ -1,200 +1,21 @@
-# CLAUDE.md — Project Skills & Conventions
+# CLAUDE.md
 
-This file documents the architecture, coding patterns, and key decisions for the
-**Instagram Auto Poster** project so that AI assistants (and new contributors) can
-work effectively without re-reading every source file.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ---
 
 ## Project Overview
 
-A Python async CLI tool that:
-1. Searches [Pexels](https://www.pexels.com/api/) for suitable short videos
-2. Downloads the chosen video locally
-3. Publishes it as an Instagram Reel via the **Instagram Graph API v19.0**
-4. Persists posting state to a JSON file to prevent duplicates and support resume
+A Python async CLI tool that runs on a daily cron schedule (Railway/GitHub Actions) and:
+
+1. Pulls persistent state from a GitHub Gist (for stateless deployments)
+2. Searches YouTube (or Pexels) for suitable short videos via their APIs
+3. Downloads the chosen video locally via yt-dlp
+4. Uploads it to a public HTTPS host (Google Drive → transfer.sh → 0x0.st → catbox.moe → filebin.net)
+5. Publishes it as an Instagram Reel via the Instagram Graph API v19.0
+6. Pushes updated state back to the GitHub Gist
 
 Entry point: `main.py` → `instagram_auto_poster/runner.py:main()`
-
----
-
-## Directory Structure
-
-```
-Insta_auto_poster_Job/
-├── main.py                         # Thin CLI entry point
-├── requirements.txt                # Runtime dependencies (no fastmcp)
-├── .env.example                    # Template for required env vars
-├── test_setup.py                   # Manual integration/smoke tests
-├── register_daily_task.ps1         # Registers Windows Task Scheduler job
-├── run_daily.ps1                   # Called by Task Scheduler
-├── run.bat                         # Simple wrapper for run_daily.ps1
-└── instagram_auto_poster/
-    ├── __init__.py
-    ├── config.py                   # Pydantic settings (AppConfig)
-    ├── runner.py                   # Main pipeline orchestrator
-    ├── instagram_api_client.py     # Graph API client (create + publish)
-    ├── pexels_client.py            # Pexels video search
-    ├── downloader.py               # Async video downloader
-    ├── caption_builder.py          # Caption / hashtag generation
-    ├── state_store.py              # Thread-safe JSON state (filelock)
-    ├── health_check.py             # System health checks
-    ├── retry_utils.py              # Exponential-backoff retry helper
-    ├── logging_config.py           # structlog setup
-    └── exceptions.py              # Custom exception hierarchy
-```
-
----
-
-## Key Environment Variables
-
-All loaded via `pydantic_settings.BaseSettings` from `.env`:
-
-| Variable | Type | Purpose |
-|----------|------|---------|
-| `PEXELS_API_KEY` | str | Pexels REST API key |
-| `PEXELS_QUERY` | str | Video search query |
-| `PEXELS_PER_PAGE` | int (1–80) | Results per search call |
-| `IG_USER_ID` | str (numeric) | Instagram Business/Creator account ID |
-| `IG_ACCESS_TOKEN` | str | Long-lived or System-User Graph API token |
-| `DOWNLOAD_DIR` | str | Local directory for downloaded videos |
-| `POSTED_STATE_FILE` | str | JSON state file path |
-| `CAPTION_THEME` | str | Theme passed to `build_caption()` |
-| `DEFAULT_HASHTAGS` | str | Comma-separated hashtag string |
-| `INSTAGRAM_MUSIC_QUERIES` | str | Comma-separated music search terms |
-| `ALLOW_POST_WITHOUT_MUSIC` | bool | Don't fail if music unavailable |
-| `MAX_VIDEO_DURATION_SECONDS` | int | Filter out long videos |
-| `MIN_ASPECT_RATIO` | float | Filter out too-wide videos |
-| `MAX_ASPECT_RATIO` | float | Filter out too-tall videos |
-| `LOG_LEVEL` | str | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
-| `LOG_FILE` | str | Optional file path for log output |
-
-> `AppConfig` lives in `config.py`. Always go through `load_config()` — never read
-> env vars directly in other modules.
-
----
-
-## Instagram Graph API Flow
-
-Implemented in `instagram_api_client.py → InstagramAPIClient`.
-
-```
-Step 1  POST /{ig_user_id}/media
-        params: media_type=REELS, video_url=<public URL>, caption=..., access_token=...
-        → returns { "id": "<creation_id>" }
-
-Step 2  GET  /{creation_id}?fields=status_code,status
-        Poll every 10 s until status_code == "FINISHED" (or "ERROR")
-        Timeout: 30 polls × 10 s = 300 s
-
-Step 3  POST /{ig_user_id}/media_publish
-        params: creation_id=<creation_id>, access_token=...
-        → returns { "id": "<media_id>" }
-```
-
-- **Base URL**: `https://graph.facebook.com/v19.0`
-- **video_url** must be a **publicly accessible HTTPS URL** — the Pexels CDN URL
-  from `DownloadedVideo.source_url` is used directly (no local file upload needed).
-- All three steps retry up to 3× with 5 s base delay via `retry_with_backoff`.
-
----
-
-## Exception Hierarchy
-
-```
-AutoPosterError
-├── ConfigurationError
-├── InstagramAPIError          ← generic Graph API failure
-├── InstagramError
-│   └── InstagramAuthError    ← 401 / invalid token (codes 190, 200, 102)
-├── MediaProcessingError      ← container stuck in ERROR or timeout
-├── PexelsError
-│   ├── PexelsAPIError
-│   └── PexelsNoResultsError
-├── StateStoreError
-└── RetryExhaustedError
-```
-
-> When adding new error conditions, extend the existing hierarchy rather than
-> raising bare `Exception`.
-
----
-
-## Retry Utility
-
-`retry_utils.py → retry_with_backoff(coro_factory, max_attempts, base_delay, exceptions)`
-
-- Retries `max_attempts` times with `base_delay * 2^attempt` seconds between tries
-- Only catches exception types listed in `exceptions` tuple
-- Used in `InstagramAPIClient` (3 attempts, 5 s base) and historically in MCP (removed)
-
----
-
-## State Store
-
-`state_store.py → PostedStateStore`
-
-- Persists a list of `VideoRecord` objects to a JSON file
-- Uses `filelock.FileLock` to prevent concurrent writes
-- Key methods:
-  - `get_pending_download()` → first record with `status == "downloaded"`
-  - `get_failed_records(max_attempts)` → records with `status == "failed"` below retry cap
-  - `used_ids()` → set of all video IDs ever processed
-  - `upsert_record(VideoRecord)` → insert or replace by `video_id`
-
----
-
-## Health Check
-
-`health_check.py → HealthChecker.check_health()` returns `HealthStatus`:
-
-| Field | Source |
-|-------|--------|
-| `instagram_api_reachable` | `GET /v19.0/me` with `ig_access_token` |
-| `pexels_api_accessible` | `GET api.pexels.com/videos/search?query=test&per_page=1` |
-| `last_successful_post` | Scans state file for latest `status == "posted"` |
-| `pending_downloads` | Count of `status == "downloaded"` records |
-| `failed_attempts_last_24h` | Count of `status == "failed"` records in last 24 h |
-| `disk_space_mb` | Write-access test to `download_dir` |
-| `config_valid` | Creates / cleans a `.health_check` sentinel file |
-
-Run standalone: `python main.py --health-check`
-
----
-
-## Logging
-
-`logging_config.py` configures [structlog](https://www.structlog.org/) with:
-- Key-value structured output
-- Configurable level via `LOG_LEVEL`
-- Optional file sink via `LOG_FILE`
-
-Usage pattern across all modules:
-```python
-from .logging_config import get_logger
-logger = get_logger(__name__)
-logger.info("Message", key=value, ...)
-```
-
----
-
-## Adding a New Feature — Checklist
-
-1. **New config field**: Add to `AppConfig` in `config.py` with a `Field(...)` and validator if needed. Add to `.env.example`.
-2. **New exception type**: Extend the hierarchy in `exceptions.py`.
-3. **New API call**: Follow the `_raise_for_api_error` + `retry_with_backoff` pattern in `instagram_api_client.py`.
-4. **New state field**: Update `VideoRecord` in `state_store.py` (and migration logic if the field is required).
-5. **New health check**: Add a private `_check_*` method in `HealthChecker` and wire it into `check_health()`.
-
----
-
-## Common Pitfalls
-
-- **Token expiry**: Long-lived tokens last 60 days. The health check catches an expired token. For production, use a non-expiring System User Token.
-- **video_url must be public**: The Graph API fetches the video from the URL you supply. Local file paths will not work.
-- **Container status polling**: Instagram transcoding can take 1–5 minutes. Do not reduce `max_polls` below 18 (3 min) for videos up to 60 s long.
-- **Config field names are lowercased**: `pydantic_settings` maps `IG_USER_ID` env var → `ig_user_id` field (case-insensitive by default via `case_sensitive = False`).
-- **`extra = 'ignore'` in `AppConfig.Config`**: Unknown env vars are silently dropped. This allows storing scheduler vars (`SCHEDULED_TASK_NAME`, `DAILY_RUN_TIME`) without validation errors.
 
 ---
 
@@ -211,13 +32,200 @@ python main.py --health-check
 $env:LOG_LEVEL = "DEBUG"; python main.py
 ```
 
-## Dependencies (requirements.txt)
+No build step — plain `pip install -r requirements.txt` into a venv.
+
+---
+
+## Architecture: Request Flow
+
+```
+runner.run_once()
+  │
+  ├─ _write_credentials_from_env()      # decode GOOGLE_DRIVE_TOKEN_B64 / YOUTUBE_COOKIES_B64
+  ├─ pull_state_from_gist()             # gist_sync.py — fetch posted_videos.json from Gist
+  ├─ store.get_pending_download()       # resume interrupted run if file already exists
+  ├─ store.get_failed_records()         # retry up to 3× for failed posts
+  │
+  └─ for each query in YOUTUBE_QUERY:
+       find_and_download_video()         # video_sources.py
+         ├─ YouTubeVideoSource.search()  # YouTube Data API v3
+         ├─ filter candidates           # duration, aspect ratio, like count, not used before
+         └─ YouTubeVideoSource.download() → YouTubeClient._download_sync()
+              ├─ yt-dlp with android_vr/android/ios clients
+              └─ on bot detection → _download_via_invidious() fallback
+       │
+       upload_to_transfer_sh()           # transfer_sh_uploader.py
+         ├─ GoogleDriveUploader (if GOOGLE_DRIVE_FOLDER_ID set)
+         └─ fallback chain: transfer.sh → 0x0.st → catbox.moe → filebin.net
+       │
+       InstagramAPIClient.create_and_publish()  # instagram_api_client.py
+         ├─ POST /media (REELS, video_url=public URL)
+         ├─ poll status until FINISHED (30 × 10s = 5 min max)
+         └─ POST /media_publish
+       │
+       store.upsert_record(status='posted')
+       downloaded.file_path.unlink()     # delete local temp file
+       push_state_to_gist()             # gist_sync.py
+```
+
+---
+
+## Module Map
+
+| Module | Responsibility |
+|--------|---------------|
+| `config.py` | `AppConfig` (pydantic-settings) — all env var loading |
+| `runner.py` | Pipeline orchestrator, credential injection, retry/resume logic |
+| `video_sources.py` | `find_and_download_video()` — source selection, filtering, download retry |
+| `youtube_client.py` | YouTube Data API search + yt-dlp download + Invidious fallback |
+| `pexels_client.py` | Pexels REST API search |
+| `downloader.py` | Generic async httpx downloader for Pexels videos |
+| `instagram_api_client.py` | Graph API: media container → poll → publish |
+| `transfer_sh_uploader.py` | Upload to public host; Google Drive primary, 4 free services as fallback |
+| `google_drive_client.py` | Google Drive upload via OAuth user credentials (token.json) |
+| `gist_sync.py` | Pull/push `posted_videos.json` to a GitHub Gist for stateless deployments |
+| `state_store.py` | `PostedStateStore` — filelock-protected JSON state |
+| `caption_builder.py` | Caption and hashtag generation |
+| `health_check.py` | `HealthChecker.check_health()` — pre-run system checks |
+| `retry_utils.py` | `retry_with_backoff()` — exponential backoff helper |
+| `logging_config.py` | structlog setup |
+| `exceptions.py` | Custom exception hierarchy |
+
+---
+
+## Key Environment Variables
+
+All loaded via `AppConfig(BaseSettings)` in `config.py`. Never read `os.environ` directly in other modules.
+
+| Variable | Purpose |
+|----------|---------|
+| `PEXELS_YN` / `YOUTUBE_YN` | `Y`/`N` flags to enable each source |
+| `PEXELS_API_KEY` | Pexels REST API key (required if `PEXELS_YN=Y`) |
+| `PEXELS_QUERY` | Pexels search query |
+| `YOUTUBE_API_KEY` | YouTube Data API v3 key (required if `YOUTUBE_YN=Y`) |
+| `YOUTUBE_QUERY` | Single query string or bracket list `[query1,query2]` — one post per query per run |
+| `YOUTUBE_MAX_DURATION_SECONDS` | Filter out videos longer than this |
+| `YOUTUBE_MIN_LIKE_COUNT` | Filter out low-engagement videos |
+| `YOUTUBE_FORMAT` | yt-dlp quality: `0`=best, `720`, `1080`, etc. |
+| `YOUTUBE_COOKIES_FILE` | Path to Netscape cookies.txt for yt-dlp bot bypass |
+| `YOUTUBE_COOKIES_B64` | Base64-encoded cookies.txt — written to `YOUTUBE_COOKIES_FILE` at startup (Railway/CI) |
+| `IG_USER_ID` | Instagram Business/Creator account ID (numeric) |
+| `IG_ACCESS_TOKEN` | Long-lived Instagram Graph API token |
+| `DOWNLOAD_DIR` | Local directory for temp video files |
+| `POSTED_STATE_FILE` | Path to `posted_videos.json` |
+| `CAPTION_THEME` | Theme string passed to `build_caption()` |
+| `DEFAULT_HASHTAGS` | Comma-separated hashtags appended to every caption |
+| `MAX_VIDEO_DURATION_SECONDS` | Instagram-side filter (separate from YouTube filter) |
+| `MIN_ASPECT_RATIO` / `MAX_ASPECT_RATIO` | Aspect ratio filter for Instagram compatibility |
+| `GH_PAT` | GitHub PAT with `gist` scope for state sync |
+| `STATE_GIST_ID` | GitHub Gist ID containing `posted_videos.json` |
+| `GOOGLE_DRIVE_FOLDER_ID` | Drive folder for video hosting (primary uploader when set) |
+| `GOOGLE_DRIVE_TOKEN_FILE` | Path to OAuth `token.json` (default: `token.json`) |
+| `GOOGLE_DRIVE_TOKEN_B64` | Base64-encoded `token.json` — written at startup (Railway/CI) |
+| `LOG_LEVEL` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
+| `LOG_FILE` | Optional file path for log output |
+
+---
+
+## Video Source Selection
+
+`AppConfig.video_source_order` returns the enabled sources in order based on `PEXELS_YN`/`YOUTUBE_YN` flags. `video_sources.py:find_and_download_video()` tries each source in order and falls back to the next on failure.
+
+`YOUTUBE_QUERY` supports bracket list format: `[taarak mehta funny shorts,bhabhi ji ghar par hai funny shorts]` — runner posts one video per query per run.
+
+---
+
+## Instagram Graph API Flow
+
+```
+POST /{ig_user_id}/media          → creation_id
+GET  /{creation_id}?fields=status_code   (poll every 10s, max 30 polls)
+POST /{ig_user_id}/media_publish  → media_id
+```
+
+- Base URL: `https://graph.facebook.com/v19.0`
+- `video_url` must be a publicly accessible HTTPS URL — this is why a video hosting step is needed
+- All three steps retry 3× with 5 s base delay via `retry_with_backoff`
+
+---
+
+## State Store
+
+`VideoRecord` fields: `video_id`, `query`, `file_path`, `source_url`, `download_url`, `downloaded_at`, `posted_at`, `caption`, `status`, `attempts`, `last_error`
+
+Status lifecycle: `downloaded` → `posted` (success) or `failed` (error)
+
+- `get_pending_download()` — resumes a run that downloaded but didn't post
+- `get_failed_records(max_attempts=3)` — eligible for retry; records without `download_url` are deleted (ID freed for reuse)
+- `upsert_record()` — insert or replace by `video_id`; uses filelock with stale-lock cleanup
+
+---
+
+## Credential Injection at Startup
+
+`runner._write_credentials_from_env()` decodes base64 env vars and writes credential files before the pipeline starts. This is how Railway/CI deployments inject secrets that yt-dlp and Google Drive SDK expect as files:
+
+- `GOOGLE_DRIVE_TOKEN_B64` → `GOOGLE_DRIVE_TOKEN_FILE` (default `token.json`)
+- `YOUTUBE_COOKIES_B64` → `YOUTUBE_COOKIES_FILE` (default `/tmp/yt_cookies.txt`)
+
+It skips writing if the file already exists (so a pre-written file in the workflow takes precedence).
+
+---
+
+## Exception Hierarchy
+
+```
+AutoPosterError
+├── ConfigurationError
+├── InstagramAPIError
+├── InstagramError
+│   └── InstagramAuthError      ← 401 / token error codes 190, 200, 102
+├── MediaProcessingError        ← upload failure, empty file, transcoding ERROR
+├── PexelsError
+│   ├── PexelsAPIError
+│   └── PexelsNoResultsError
+├── YouTubeError
+│   ├── YouTubeAPIError
+│   └── YouTubeNoResultsError
+├── StateStoreError
+└── RetryExhaustedError
+```
+
+---
+
+## Adding a New Feature — Checklist
+
+1. **New config field**: Add to `AppConfig` in `config.py` with `Field(...)`. Add to `.env.example`.
+2. **New exception type**: Extend the hierarchy in `exceptions.py`.
+3. **New API call**: Follow the `_raise_for_api_error` + `retry_with_backoff` pattern in `instagram_api_client.py`.
+4. **New state field**: Update `VideoRecord` in `state_store.py`; add a default in the `normalized` dict in `get_pending_download()` and `get_failed_records()` for backwards compatibility.
+5. **New health check**: Add a private `_check_*` method in `HealthChecker` and wire into `check_health()`.
+6. **New credential file**: Add a decode block in `_write_credentials_from_env()` in `runner.py`.
+
+---
+
+## Common Pitfalls
+
+- **YouTube bot detection**: Cloud IPs (GitHub Actions, Railway, Render) are blocked by YouTube. Fix: export cookies from a logged-in browser, base64-encode, set `YOUTUBE_COOKIES_B64`. Cookies expire after ~6–12 months or if you log out.
+- **Invidious fallback**: All public Invidious instances are frequently down. It's a last resort, not a reliable primary fallback.
+- **`video_url` must be public HTTPS**: The Graph API downloads the video server-side. Local paths don't work — always upload to a public host first.
+- **Google Drive token**: Must be OAuth user credentials (`token.json` with `refresh_token`), NOT a service account key. Generate via the `google_driveapi_setup` companion project.
+- **`GH_PAT` not `GITHUB_TOKEN`**: GitHub Actions reserves `GITHUB_TOKEN` and overrides it with a repo-scoped token that cannot write to Gists.
+- **Container status polling**: Instagram transcoding takes 1–5 minutes. Don't reduce `max_polls` below 18 (3 min) for 60 s videos.
+- **`extra = 'ignore'` in `AppConfig.Config`**: Unknown env vars are silently dropped — safe to have scheduler-only vars in the environment.
+
+---
+
+## Dependencies
 
 | Package | Purpose |
 |---------|---------|
-| `httpx` | Async HTTP client (Pexels, Graph API, health checks) |
-| `pydantic` | Data models and validation |
-| `pydantic-settings` | Environment variable loading into `AppConfig` |
+| `httpx` | Async HTTP client (all API calls) |
+| `yt-dlp` | YouTube video download |
+| `pydantic` / `pydantic-settings` | Config models and env var loading |
 | `python-dotenv` | `.env` file loading |
-| `structlog` | Structured logging |
+| `structlog` | Structured key-value logging |
 | `filelock` | Thread-safe state file locking |
+| `google-api-python-client` | Google Drive upload |
+| `google-auth-oauthlib` / `google-auth-httplib2` | OAuth credential refresh |
+| `imageio-ffmpeg` | Bundled ffmpeg for yt-dlp merging |
