@@ -51,6 +51,9 @@ class AppConfig(BaseSettings):
     log_level: str = Field("INFO", description="Logging level")
     log_file: str = Field("", description="Optional log file path")
 
+    # SQLite video ID dedup store — persisted on Railway Volume at /data
+    video_id_db: str = Field("/data/videos.db", description="SQLite DB path for posted video IDs (use /data/videos.db on Railway)")
+
     # Remote State Sync (GitHub Gist) — for GitHub Actions / Render free tier
     # When both are set the state file is pulled from the Gist at startup
     # and pushed back after every run, giving free persistent storage.
@@ -118,6 +121,12 @@ class AppConfig(BaseSettings):
             raise ValueError(f'Log level must be one of: {", ".join(valid_levels)}')
         return v.upper()
     
+    @property
+    def video_id_db_path(self) -> Path:
+        """Get SQLite DB path as Path object."""
+        p = Path(self.video_id_db)
+        return p if p.is_absolute() else Path.cwd() / p
+
     @property
     def download_dir_path(self) -> Path:
         """Get download directory as Path object (absolute or cwd-relative)."""

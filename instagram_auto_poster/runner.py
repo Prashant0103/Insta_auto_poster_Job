@@ -12,6 +12,7 @@ from .instagram_api_client import InstagramAPIClient
 from .gist_sync import pull_state_from_gist, push_state_to_gist
 from .video_sources import find_and_download_video
 from .state_store import PostedStateStore, VideoRecord
+from .video_id_store import VideoIdStore
 from .health_check import HealthChecker
 from .logging_config import setup_logging, get_logger, log_error
 from .exceptions import (
@@ -114,6 +115,7 @@ def _find_pending_or_retry(store: PostedStateStore) -> VideoRecord | None:
 async def _post_single(
     config: AppConfig,
     store: PostedStateStore,
+    video_id_store: VideoIdStore,
     query: str,
     pending_record: VideoRecord | None,
 ) -> None:
@@ -137,7 +139,8 @@ async def _post_single(
                     attempts=attempts)
     else:
         logger.info("Searching for new video", query=query, source_order=config.video_source_order)
-        downloaded, query = await find_and_download_video(config, store.used_ids(), query=query)
+        used_ids = store.used_ids() | video_id_store.all_ids()
+        downloaded, query = await find_and_download_video(config, used_ids, query=query)
 
         if downloaded.video_id.startswith("youtube-"):
             caption = build_caption_from_youtube(
@@ -223,6 +226,7 @@ async def _post_single(
         await _push_gist(config)
         raise
 
+    posted_at_ts = datetime.now().isoformat(timespec='seconds')
     store.upsert_record(VideoRecord(
         video_id=downloaded.video_id,
         query=query,
@@ -230,12 +234,13 @@ async def _post_single(
         source_url=source_url,
         download_url=download_url,
         downloaded_at=downloaded_at,
-        posted_at=datetime.now().isoformat(timespec='seconds'),
+        posted_at=posted_at_ts,
         caption=caption,
         status='posted',
         attempts=attempts + 1,
         last_error='',
     ))
+    video_id_store.add(downloaded.video_id, posted_at_ts)
 
     try:
         downloaded.file_path.unlink(missing_ok=True)
@@ -290,6 +295,7 @@ async def run_once() -> None:
         logger.warning("Health check failed, but continuing with execution")
 
     store = PostedStateStore(config.posted_state_file_path)
+    video_id_store = VideoIdStore(config.video_id_db_path)
 
     _gist_enabled = bool(config.gh_pat and config.state_gist_id)
     if _gist_enabled:
@@ -305,7 +311,7 @@ async def run_once() -> None:
     # Retry any pending/failed record first (one per run)
     pending = _find_pending_or_retry(store)
     if pending:
-        await _post_single(config, store, query=pending.query, pending_record=pending)
+        await _post_single(config, store, video_id_store, query=pending.query, pending_record=pending)
         return
 
     # Post one video per configured query
@@ -313,7 +319,7 @@ async def run_once() -> None:
     logger.info("Starting run", query_count=len(queries), queries=queries)
     for query in queries:
         logger.info("Processing query", query=query)
-        await _post_single(config, store, query=query, pending_record=None)
+        await _post_single(config, store, video_id_store, query=query, pending_record=None)
 
 
 async def run_health_check_only() -> None:

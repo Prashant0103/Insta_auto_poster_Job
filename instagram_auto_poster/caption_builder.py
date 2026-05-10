@@ -23,9 +23,17 @@ CLOSERS = [
 ]
 
 
+_URL_RE = re.compile(r'https?://\S+|www\.\S+', re.IGNORECASE)
+
+
+def _strip_urls(text: str) -> str:
+    return re.sub(r'\s*' + _URL_RE.pattern, '', text, flags=re.IGNORECASE).strip()
+
+
 def _clean_title(title: str) -> str:
     """Strip YouTube-specific noise so the title works as an Instagram hook."""
-    cleaned = re.sub(r'#\S+', '', title)                  # remove #shorts etc.
+    cleaned = _strip_urls(title)
+    cleaned = re.sub(r'#\S+', '', cleaned)                # remove #shorts etc.
     cleaned = re.sub(r'\[.*?\]|\(.*?\)', '', cleaned)     # remove [channel] / (official)
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     # Capitalise first letter if not already
@@ -49,7 +57,7 @@ def build_caption_from_youtube(title: str, description: str, hashtags: list[str]
         )
 
     clean_title = _clean_title(title)
-    clean_desc = description.strip()
+    clean_desc = _strip_urls(description.strip())
 
     # Build full caption: title + description + hashtags (each separated by blank line)
     body_parts = [p for p in [clean_title, clean_desc] if p]
