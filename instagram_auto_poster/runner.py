@@ -241,8 +241,23 @@ async def _post_single(
     await _push_gist(config)
 
 
+def _write_credentials_from_env() -> None:
+    """Write token.json from GOOGLE_DRIVE_TOKEN_B64 env var if set (Railway/CI use)."""
+    import base64
+    import os
+    token_b64 = os.environ.get("GOOGLE_DRIVE_TOKEN_B64", "").strip()
+    token_file = os.environ.get("GOOGLE_DRIVE_TOKEN_FILE", "token.json")
+    if token_b64 and not Path(token_file).exists():
+        try:
+            Path(token_file).write_bytes(base64.b64decode(token_b64))
+            print(f"Written Google Drive token to {token_file}")
+        except Exception as e:
+            print(f"Warning: failed to write Google Drive token: {e}")
+
+
 async def run_once() -> None:
     """Run one iteration of the Instagram auto-poster."""
+    _write_credentials_from_env()
     try:
         config = load_config()
         setup_logging(config.log_level, config.log_file_path)
