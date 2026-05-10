@@ -28,13 +28,16 @@ FORMAT_MAP: dict[str, str] = {
 }
 DOWNLOAD_CLIENTS = ["android_vr", "android", "ios", "tv_embedded", "mweb", "web"]
 YOUTUBE_API_BASE_URL = "https://www.googleapis.com/youtube/v3"
-INVIDIOUS_INSTANCES = [
+_INVIDIOUS_FALLBACK_INSTANCES = [
     "https://inv.nadeko.net",
     "https://invidious.privacyredirect.com",
     "https://iv.datura.network",
     "https://invidious.nerdvpn.de",
     "https://yt.artemislena.eu",
     "https://invidious.materialio.us",
+    "https://invidious.protokolla.fi",
+    "https://invidious.drgns.space",
+    "https://inv.tux.pizza",
 ]
 
 
@@ -406,14 +409,45 @@ def _is_bot_detection_error(message: str) -> bool:
     return "sign in to confirm" in message.lower() or "bot" in message.lower()
 
 
+def _fetch_invidious_instances() -> list[str]:
+    """Fetch live API-enabled Invidious instances from the public registry."""
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get("https://api.invidious.io/instances.json")
+            if resp.status_code != 200:
+                return _INVIDIOUS_FALLBACK_INSTANCES
+            instances = []
+            for entry in resp.json():
+                if not isinstance(entry, list) or len(entry) < 2:
+                    continue
+                info = entry[1]
+                if (
+                    isinstance(info, dict)
+                    and info.get("api") is True
+                    and info.get("type") == "https"
+                ):
+                    uri = info.get("uri", "").rstrip("/")
+                    if uri:
+                        instances.append(uri)
+            logger.info("Fetched Invidious instances from registry", count=len(instances))
+            return instances if instances else _INVIDIOUS_FALLBACK_INSTANCES
+    except Exception as e:
+        logger.warning("Failed to fetch Invidious registry, using fallback list", error=str(e))
+        return _INVIDIOUS_FALLBACK_INSTANCES
+
+
 def _download_via_invidious(raw_video_id: str, dest_path: Path) -> Path | None:
-    """Try each Invidious instance to get a proxied MP4 stream and download it."""
-    for instance in INVIDIOUS_INSTANCES:
+    """Try Invidious instances (live registry + fallback) to get a proxied MP4 stream."""
+    instances = _fetch_invidious_instances()
+
+    for instance in instances:
         try:
             logger.info("Trying Invidious instance", instance=instance, video_id=raw_video_id)
             with httpx.Client(timeout=15.0, follow_redirects=True) as client:
                 resp = client.get(f"{instance}/api/v1/videos/{raw_video_id}")
                 if resp.status_code != 200:
+                    logger.warning("Invidious instance returned non-200",
+                                   instance=instance, status=resp.status_code)
                     continue
                 data = resp.json()
 
@@ -423,9 +457,9 @@ def _download_via_invidious(raw_video_id: str, dest_path: Path) -> Path | None:
                 if "mp4" in s.get("container", "") or "mp4" in s.get("type", "")
             ]
             if not streams:
+                logger.warning("No MP4 streams from Invidious instance", instance=instance)
                 continue
 
-            # Pick highest quality
             def _quality_rank(s: dict) -> int:
                 label = s.get("qualityLabel", "")
                 for res in ("1080", "720", "480", "360"):
