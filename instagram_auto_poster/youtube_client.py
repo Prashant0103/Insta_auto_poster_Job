@@ -28,6 +28,14 @@ FORMAT_MAP: dict[str, str] = {
 }
 DOWNLOAD_CLIENTS = ["android_vr", "android", "ios", "tv_embedded", "mweb", "web"]
 YOUTUBE_API_BASE_URL = "https://www.googleapis.com/youtube/v3"
+INVIDIOUS_INSTANCES = [
+    "https://inv.nadeko.net",
+    "https://invidious.privacyredirect.com",
+    "https://iv.datura.network",
+    "https://invidious.nerdvpn.de",
+    "https://yt.artemislena.eu",
+    "https://invidious.materialio.us",
+]
 
 
 def _build_js_runtimes() -> dict:
@@ -286,6 +294,29 @@ class YouTubeClient:
             )
         except Exception as exc:
             message = str(exc).removeprefix("ERROR: ").strip()
+            if _is_bot_detection_error(message):
+                logger.warning(
+                    "Bot detection triggered, trying Invidious fallback",
+                    video_id=video.video_id,
+                )
+                raw_id = video.video_id.replace("youtube-", "")
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                safe_id = _safe_filename(video.video_id)
+                dest_path = self.download_dir / f"{timestamp}_{safe_id}.mp4"
+                invidious_path = _download_via_invidious(raw_id, dest_path)
+                if invidious_path:
+                    logger.info(
+                        "Invidious fallback download completed",
+                        video_id=video.video_id,
+                        file_size_mb=f"{invidious_path.stat().st_size / (1024 * 1024):.2f}",
+                    )
+                    return DownloadedVideo(
+                        video_id=video.video_id,
+                        file_path=invidious_path,
+                        source_url=video.source_url,
+                        download_url="",
+                        title=video.title,
+                    )
             logger.error("YouTube download failed", video_id=video.video_id, error=message)
             raise MediaProcessingError(f"YouTube download failed: {message}") from exc
 
@@ -369,4 +400,57 @@ def _import_yt_dlp():
         raise MediaProcessingError(
             "yt-dlp is not installed. Run: pip install -r requirements.txt"
         ) from exc
+
+
+def _is_bot_detection_error(message: str) -> bool:
+    return "sign in to confirm" in message.lower() or "bot" in message.lower()
+
+
+def _download_via_invidious(raw_video_id: str, dest_path: Path) -> Path | None:
+    """Try each Invidious instance to get a proxied MP4 stream and download it."""
+    for instance in INVIDIOUS_INSTANCES:
+        try:
+            logger.info("Trying Invidious instance", instance=instance, video_id=raw_video_id)
+            with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+                resp = client.get(f"{instance}/api/v1/videos/{raw_video_id}")
+                if resp.status_code != 200:
+                    continue
+                data = resp.json()
+
+            # formatStreams = progressive mp4 (video+audio combined, no ffmpeg needed)
+            streams = [
+                s for s in data.get("formatStreams", [])
+                if "mp4" in s.get("container", "") or "mp4" in s.get("type", "")
+            ]
+            if not streams:
+                continue
+
+            # Pick highest quality
+            def _quality_rank(s: dict) -> int:
+                label = s.get("qualityLabel", "")
+                for res in ("1080", "720", "480", "360"):
+                    if res in label:
+                        return int(res)
+                return 0
+
+            streams.sort(key=_quality_rank, reverse=True)
+            stream_url = streams[0]["url"]
+
+            logger.info("Downloading via Invidious", instance=instance, url=stream_url[:80])
+            with httpx.Client(timeout=httpx.Timeout(120.0), follow_redirects=True) as client:
+                with client.stream("GET", stream_url) as r:
+                    r.raise_for_status()
+                    with dest_path.open("wb") as f:
+                        for chunk in r.iter_bytes(chunk_size=1024 * 1024):
+                            f.write(chunk)
+
+            if dest_path.exists() and dest_path.stat().st_size > 0:
+                return dest_path
+
+        except Exception as e:
+            logger.warning("Invidious instance failed", instance=instance, error=str(e))
+            if dest_path.exists():
+                dest_path.unlink(missing_ok=True)
+
+    return None
 
