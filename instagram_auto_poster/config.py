@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
@@ -53,6 +54,9 @@ class AppConfig(BaseSettings):
 
     # SQLite video ID dedup store — persisted on Railway Volume at /data
     video_id_db: str = Field("/data/videos.db", description="SQLite DB path for posted video IDs (use /data/videos.db on Railway)")
+
+    # YouTube published-date filter — skip videos older than this date (DD-MM-YYYY)
+    check_published_date: Optional[str] = Field(None, description="Only include YouTube videos published on or after this date (DD-MM-YYYY)")
 
     # Remote State Sync (GitHub Gist) — for GitHub Actions / Render free tier
     # When both are set the state file is pulled from the Gist at startup
@@ -151,6 +155,17 @@ class AppConfig(BaseSettings):
     def default_hashtags_list(self) -> List[str]:
         """Parse default hashtags from comma-separated string."""
         return [tag.strip() for tag in self.default_hashtags.split(',') if tag.strip()]
+
+    @property
+    def check_published_date_dt(self) -> Optional[datetime]:
+        """Parse CHECK_PUBLISHED_DATE (DD-MM-YYYY) into a datetime, or None if unset."""
+        raw = (self.check_published_date or "").strip().strip("'\"")
+        if not raw:
+            return None
+        try:
+            return datetime.strptime(raw, "%d-%m-%Y")
+        except ValueError:
+            return None
     
     @property
     def youtube_queries_list(self) -> List[str]:

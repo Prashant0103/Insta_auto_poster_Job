@@ -111,6 +111,7 @@ class YouTubeVideoSource:
             max_results=self.config.youtube_max_results,
             max_duration_seconds=self.config.youtube_max_duration_seconds,
             min_like_count=self.config.youtube_min_like_count,
+            min_published_date=self.config.check_published_date_dt,
         )
 
     async def download(self, video: SourceVideo) -> DownloadedVideo:

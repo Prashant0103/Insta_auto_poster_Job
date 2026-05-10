@@ -93,6 +93,7 @@ class YouTubeClient:
         max_results: int,
         max_duration_seconds: int,
         min_like_count: int,
+        min_published_date: datetime | None = None,
     ) -> List[YouTubeVideo]:
         """Search and filter YouTube videos that qualify as Shorts."""
         filtered_json = await self.search_shorts_json(
@@ -100,6 +101,7 @@ class YouTubeClient:
             max_results=max_results,
             max_duration_seconds=max_duration_seconds,
             min_like_count=min_like_count,
+            min_published_date=min_published_date,
         )
         return [
             YouTubeVideo(
@@ -122,6 +124,7 @@ class YouTubeClient:
         max_results: int,
         max_duration_seconds: int,
         min_like_count: int,
+        min_published_date: datetime | None = None,
     ) -> list[dict]:
         """
         Return filtered YouTube Shorts candidates sorted by likeCount desc.
@@ -163,6 +166,19 @@ class YouTubeClient:
                     continue
                 if like_count < min_like_count:
                     continue
+                if min_published_date is not None:
+                    raw_published = (
+                        detail_snippet.get("publishedAt")
+                        or snippet.get("publishedAt", "")
+                    )
+                    try:
+                        published_dt = datetime.fromisoformat(
+                            raw_published.replace("Z", "+00:00")
+                        ).replace(tzinfo=None)
+                    except (ValueError, AttributeError):
+                        published_dt = None
+                    if published_dt is None or published_dt < min_published_date:
+                        continue
 
                 localized = detail_snippet.get("localized", {})
                 filtered.append(
@@ -199,6 +215,7 @@ class YouTubeClient:
                 filtered=len(filtered),
                 max_duration_seconds=max_duration_seconds,
                 min_like_count=min_like_count,
+                min_published_date=min_published_date.strftime("%Y-%m-%d") if min_published_date else None,
             )
             return filtered
         except YouTubeNoResultsError:
