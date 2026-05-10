@@ -41,26 +41,37 @@ def build_caption_from_youtube(title: str, description: str, hashtags: list[str]
     Truncates description if the combined caption would exceed Instagram's
     2,200-character limit. Title and hashtags are never truncated.
     """
-    hashtag_text = " ".join(f'#{tag.lstrip("#")}' for tag in hashtags)
+    hashtag_text = " ".join(f'#{tag.lstrip("#")}' for tag in hashtags if tag.strip())
+    if not hashtag_text:
+        raise ValueError(
+            "DEFAULT_HASHTAGS is empty — set it in your environment variables "
+            "(e.g. DEFAULT_HASHTAGS=#reels,#shorts,#viral)"
+        )
+
     clean_title = _clean_title(title)
     clean_desc = description.strip()
 
-    parts = [p for p in [clean_title, clean_desc, hashtag_text] if p]
-    full = "\n\n".join(parts)
+    # Build full caption: title + description + hashtags (each separated by blank line)
+    body_parts = [p for p in [clean_title, clean_desc] if p]
+    body = "\n\n".join(body_parts)
+    full = f"{body}\n\n{hashtag_text}" if body else hashtag_text
 
     if len(full) <= INSTAGRAM_MAX_CAPTION:
         return full
 
-    # Separators between the three parts (title always present, hashtags always present)
-    # title + \n\n + desc + \n\n + hashtags
-    fixed_len = len(clean_title) + 2 + 2 + len(hashtag_text)  # 2+2 for two \n\n separators
-    available = INSTAGRAM_MAX_CAPTION - fixed_len - 3  # 3 for trailing "..."
+    # Truncate description to fit within limit; title and hashtags are never cut
+    # Structure: body_fixed + "\n\n" + truncated_desc + "..." + "\n\n" + hashtags
+    # body_fixed = clean_title + "\n\n" (if title present), else ""
+    title_part = f"{clean_title}\n\n" if clean_title else ""
+    fixed_len = len(title_part) + 2 + len(hashtag_text)  # 2 for final \n\n before hashtags
+    available = INSTAGRAM_MAX_CAPTION - fixed_len - 3     # 3 for "..."
 
     if available <= 0 or not clean_desc:
-        return "\n\n".join(p for p in [clean_title, hashtag_text] if p)
+        # No room for description; return title + hashtags only
+        return f"{title_part.rstrip()}\n\n{hashtag_text}" if clean_title else hashtag_text
 
     truncated_desc = clean_desc[:available] + "..."
-    return "\n\n".join(p for p in [clean_title, truncated_desc, hashtag_text] if p)
+    return f"{title_part}{truncated_desc}\n\n{hashtag_text}"
 
 
 def build_caption(theme: str, hashtags: list[str], query: str, title: str = "") -> str:

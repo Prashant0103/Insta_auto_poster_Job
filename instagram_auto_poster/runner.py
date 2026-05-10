@@ -188,7 +188,9 @@ async def _post_single(
                 video_url = downloaded.download_url
 
             logger.info("Posting video to Instagram via Graph API",
-                        video_url=video_url, caption_length=len(caption))
+                        video_url=video_url,
+                        caption_length=len(caption),
+                        caption_preview=caption[:120].replace("\n", "\\n"))
 
             media_id = await client.create_and_publish(
                 video_url=video_url,
