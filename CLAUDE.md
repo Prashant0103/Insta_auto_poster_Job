@@ -30,9 +30,21 @@ python main.py --health-check
 
 # Debug output
 $env:LOG_LEVEL = "DEBUG"; python main.py
+
+# Validate setup (no external API calls)
+python test_setup.py
 ```
 
 No build step — plain `pip install -r requirements.txt` into a venv.
+
+---
+
+## CI/CD Schedule
+
+GitHub Actions workflow (`.github/workflows/post.yml`):
+- Runs daily at **03:30 UTC (09:00 IST)** + `workflow_dispatch` for manual trigger
+- Requires **Node.js 20** (yt-dlp n-challenge solving) alongside Python 3.11
+- Workflow steps write credential files directly (`/tmp/yt_cookies.txt`, `/tmp/gdrive_token.json`) before running `python main.py` — runner's `_write_credentials_from_env()` skips writing if those files already exist
 
 ---
 
@@ -85,6 +97,9 @@ runner.run_once()
 | `google_drive_client.py` | Google Drive upload via OAuth user credentials (token.json) |
 | `gist_sync.py` | Pull/push `posted_videos.json` to a GitHub Gist for stateless deployments |
 | `state_store.py` | `PostedStateStore` — filelock-protected JSON state |
+| `video_id_store.py` | `VideoIdStore` — SQLite-backed global dedup (persisted at `/data/videos.db` on Railway) |
+| `music_client.py` | `MusicClient` — Jamendo API search + download of royalty-free CC-licensed tracks |
+| `video_processor.py` | `merge_video_with_music()` — ffmpeg: replace video audio with background music + fade-out |
 | `caption_builder.py` | Caption and hashtag generation |
 | `health_check.py` | `HealthChecker.check_health()` — pre-run system checks |
 | `retry_utils.py` | `retry_with_backoff()` — exponential backoff helper |
@@ -102,17 +117,22 @@ All loaded via `AppConfig(BaseSettings)` in `config.py`. Never read `os.environ`
 | `PEXELS_YN` / `YOUTUBE_YN` | `Y`/`N` flags to enable each source |
 | `PEXELS_API_KEY` | Pexels REST API key (required if `PEXELS_YN=Y`) |
 | `PEXELS_QUERY` | Pexels search query |
+| `PEXELS_PER_PAGE` | Results per page for Pexels (1–80, default 20) |
 | `YOUTUBE_API_KEY` | YouTube Data API v3 key (required if `YOUTUBE_YN=Y`) |
 | `YOUTUBE_QUERY` | Single query string or bracket list `[query1,query2]` — one post per query per run |
+| `YOUTUBE_MAX_RESULTS` | Number of YouTube results to fetch per search (1–50, default 8) |
 | `YOUTUBE_MAX_DURATION_SECONDS` | Filter out videos longer than this |
 | `YOUTUBE_MIN_LIKE_COUNT` | Filter out low-engagement videos |
 | `YOUTUBE_FORMAT` | yt-dlp quality: `0`=best, `720`, `1080`, etc. |
 | `YOUTUBE_COOKIES_FILE` | Path to Netscape cookies.txt for yt-dlp bot bypass |
 | `YOUTUBE_COOKIES_B64` | Base64-encoded cookies.txt — written to `YOUTUBE_COOKIES_FILE` at startup (Railway/CI) |
+| `CHECK_PUBLISHED_DATE` | Only include YouTube videos published on or after this date (`DD-MM-YYYY`) |
+| `VIDEO_ID` | YouTube video ID to post directly — bypasses search entirely |
 | `IG_USER_ID` | Instagram Business/Creator account ID (numeric) |
 | `IG_ACCESS_TOKEN` | Long-lived Instagram Graph API token |
 | `DOWNLOAD_DIR` | Local directory for temp video files |
 | `POSTED_STATE_FILE` | Path to `posted_videos.json` |
+| `VIDEO_ID_DB` | SQLite DB path for global video ID dedup (default `/data/videos.db` — use Railway Volume) |
 | `CAPTION_THEME` | Theme string passed to `build_caption()` |
 | `DEFAULT_HASHTAGS` | Comma-separated hashtags appended to every caption |
 | `MAX_VIDEO_DURATION_SECONDS` | Instagram-side filter (separate from YouTube filter) |
@@ -133,6 +153,8 @@ All loaded via `AppConfig(BaseSettings)` in `config.py`. Never read `os.environ`
 
 `YOUTUBE_QUERY` supports bracket list format: `[taarak mehta funny shorts,bhabhi ji ghar par hai funny shorts]` — runner posts one video per query per run.
 
+When `VIDEO_ID` is set, `runner._post_direct_video_id()` is called instead — it downloads that specific YouTube video ID without searching and posts it directly.
+
 ---
 
 ## Instagram Graph API Flow
@@ -151,7 +173,12 @@ POST /{ig_user_id}/media_publish  → media_id
 
 ## State Store
 
-`VideoRecord` fields: `video_id`, `query`, `file_path`, `source_url`, `download_url`, `downloaded_at`, `posted_at`, `caption`, `status`, `attempts`, `last_error`
+Two complementary dedup mechanisms:
+
+- **`PostedStateStore`** (`state_store.py`) — filelock-protected JSON; tracks per-record status with retry logic. Synced to/from GitHub Gist for stateless deployments.
+- **`VideoIdStore`** (`video_id_store.py`) — SQLite (`VIDEO_ID_DB`); stores only `(video_id, posted_at)`. On Railway, mount a Volume at `/data` so this persists across deploys.
+
+`VideoRecord` fields: `video_id`, `query`, `file_path`, `source_url`, `download_url`, `downloaded_at`, `posted_at`, `caption`, `music_query`, `status`, `attempts`, `last_error`
 
 Status lifecycle: `downloaded` → `posted` (success) or `failed` (error)
 
@@ -213,6 +240,7 @@ AutoPosterError
 - **`GH_PAT` not `GITHUB_TOKEN`**: GitHub Actions reserves `GITHUB_TOKEN` and overrides it with a repo-scoped token that cannot write to Gists.
 - **Container status polling**: Instagram transcoding takes 1–5 minutes. Don't reduce `max_polls` below 18 (3 min) for 60 s videos.
 - **`extra = 'ignore'` in `AppConfig.Config`**: Unknown env vars are silently dropped — safe to have scheduler-only vars in the environment.
+- **SQLite dedup on Railway**: `VideoIdStore` defaults to `/data/videos.db`. Without a Railway Volume mounted at `/data`, the SQLite file is lost on every redeploy and videos can repeat.
 
 ---
 
