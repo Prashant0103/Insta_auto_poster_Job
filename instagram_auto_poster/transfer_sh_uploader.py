@@ -99,7 +99,12 @@ async def upload_to_transfer_sh(file_path: Path, config=None) -> str:
     """
     logger.info("Uploading video to public host", path=str(file_path))
 
-    if config is not None and (config.google_drive_folder_id or "").strip():
+    gdrive_enabled = (
+        config is not None
+        and (config.google_drive_folder_id or "").strip()
+        and getattr(config, "google_drive_upload_yn", "Y").strip().upper() == "Y"
+    )
+    if gdrive_enabled:
         try:
             url = await _try_google_drive(file_path, config)
             logger.info("Upload successful", service="google_drive", url=url)
