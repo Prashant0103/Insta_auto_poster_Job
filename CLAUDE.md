@@ -22,20 +22,25 @@ Entry point: `main.py` → `instagram_auto_poster/runner.py:main()`
 ## Running Locally
 
 ```powershell
+# First-time setup
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+copy .env.example .env   # then fill in credentials
+
 # One-off post
 python main.py
 
-# Health check only
+# Health check only (validates API tokens, disk, state — no post)
 python main.py --health-check
 
 # Debug output
 $env:LOG_LEVEL = "DEBUG"; python main.py
 
-# Validate setup (no external API calls)
+# Smoke tests — 6 checks covering imports, config validation, logging,
+# state store, health check, and API client instantiation (no external calls)
 python test_setup.py
 ```
-
-No build step — plain `pip install -r requirements.txt` into a venv.
 
 ---
 
@@ -228,6 +233,7 @@ AutoPosterError
 4. **New state field**: Update `VideoRecord` in `state_store.py`; add a default in the `normalized` dict in `get_pending_download()` and `get_failed_records()` for backwards compatibility.
 5. **New health check**: Add a private `_check_*` method in `HealthChecker` and wire into `check_health()`.
 6. **New credential file**: Add a decode block in `_write_credentials_from_env()` in `runner.py`.
+7. **Logging in a new module**: `from .logging_config import get_logger; logger = get_logger(__name__)` — use `logger.info("msg", key=value)` key-value style throughout.
 
 ---
 
@@ -240,6 +246,7 @@ AutoPosterError
 - **`GH_PAT` not `GITHUB_TOKEN`**: GitHub Actions reserves `GITHUB_TOKEN` and overrides it with a repo-scoped token that cannot write to Gists.
 - **Container status polling**: Instagram transcoding takes 1–5 minutes. Don't reduce `max_polls` below 18 (3 min) for 60 s videos.
 - **`extra = 'ignore'` in `AppConfig.Config`**: Unknown env vars are silently dropped — safe to have scheduler-only vars in the environment.
+- **Pydantic env var casing**: `pydantic_settings` maps env vars case-insensitively — `IG_USER_ID` in the environment becomes field `ig_user_id` in `AppConfig`. Always access config via field name, not the env var name string.
 - **SQLite dedup on Railway**: `VideoIdStore` defaults to `/data/videos.db`. Without a Railway Volume mounted at `/data`, the SQLite file is lost on every redeploy and videos can repeat.
 
 ---

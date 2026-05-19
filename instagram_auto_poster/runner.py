@@ -395,9 +395,10 @@ async def run_once() -> None:
     else:
         logger.debug("Gist sync not configured — using local state only")
 
-    # Direct video override: if VIDEO_ID is set, skip search entirely
-    if config.video_id and config.video_id.strip():
-        await _post_direct_video_id(config, store, video_id_store, config.video_id.strip())
+    # Direct video override: YOUTUBE_VIDEO_ID takes priority, then VIDEO_ID
+    _direct_id = (config.youtube_video_id or "").strip() or (config.video_id or "").strip()
+    if _direct_id:
+        await _post_direct_video_id(config, store, video_id_store, _direct_id)
         return
 
     # Retry any pending/failed record first (one per run)

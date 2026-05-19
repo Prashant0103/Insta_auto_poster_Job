@@ -27,7 +27,7 @@ class AppConfig(BaseSettings):
     youtube_api_key: str = Field("", description="YouTube Data API v3 key")
     youtube_query: str = Field("viral shorts", description="Search query for YouTube videos")
     youtube_max_results: int = Field(8, ge=1, le=50, description="Number of YouTube results to fetch")
-    youtube_max_duration_seconds: int = Field(60, ge=1, le=300, description="Maximum YouTube video duration")
+    youtube_max_duration_seconds: int = Field(60, ge=1, description="Maximum YouTube video duration in seconds")
     youtube_min_like_count: int = Field(2_000_000, ge=0, description="Minimum YouTube like count")
     youtube_format: str = Field("720", description="Max YouTube download quality (e.g. 1080, 720). Set to 0 for best available quality.")
     youtube_cookies_file: str = Field("", description="Path to Netscape cookies.txt for yt-dlp bot bypass (e.g. /tmp/yt_cookies.txt)")
@@ -44,7 +44,7 @@ class AppConfig(BaseSettings):
     caption_theme: str = Field(..., description="Theme for generated captions")
     default_hashtags: str = Field(..., description="Comma-separated default hashtags")
     # Posting Configuration
-    max_video_duration_seconds: int = Field(60, ge=1, le=300, description="Maximum video duration")
+    max_video_duration_seconds: int = Field(60, ge=1, description="Maximum video duration in seconds")
     min_aspect_ratio: float = Field(0.5, ge=0.1, le=10.0, description="Minimum aspect ratio")
     max_aspect_ratio: float = Field(2.0, ge=0.1, le=10.0, description="Maximum aspect ratio")
     
@@ -57,6 +57,7 @@ class AppConfig(BaseSettings):
 
     # Direct video override — when set, skip search and post this YouTube video ID
     video_id: Optional[str] = Field(None, description="YouTube video ID to post directly (bypasses search)")
+    youtube_video_id: Optional[str] = Field(None, description="YouTube video ID to post directly (alias for VIDEO_ID; takes priority)")
 
     # YouTube published-date filter — skip videos older than this date (DD-MM-YYYY)
     check_published_date: Optional[str] = Field(None, description="Only include YouTube videos published on or after this date (DD-MM-YYYY)")
