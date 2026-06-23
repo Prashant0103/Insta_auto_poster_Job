@@ -50,8 +50,8 @@ jobs:
       - name: Run Instagram Auto Poster
         env:
           # Video source flags
-          PEXELS_YN: "N"
-          YOUTUBE_YN: "Y"
+          PEXELS_YN: "Y"
+          YOUTUBE_YN: "N"
 
           # Pexels (set PEXELS_YN=Y to activate)
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
